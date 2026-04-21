@@ -1,0 +1,15 @@
+{ "translations": {
+    "Group" : "Бүлэг",
+    "Create" : "Үүсгэх",
+    "Delete" : "Устгах",
+    "Share" : "Түгээх",
+    "Add group" : "Бүлэг нэмэх",
+    "Folder name" : "Хавтасны нэр",
+    "Quota" : " хувь хэмжээ",
+    "Previous" : "өмнөх",
+    "Next" : "Даараах",
+    "Unknown" : "Үл танигдах зүйл",
+    "None" : "юу ч үгүй",
+    "{size} used" : "{size} хэрэглэсэн"
+},"pluralForm" :"nplurals=2; plural=(n != 1);"
+}

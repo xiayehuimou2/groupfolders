@@ -1,0 +1,17 @@
+{ "translations": {
+    "Group" : "Gruppe",
+    "Create" : "Lag",
+    "Delete" : "Ta bort",
+    "Share" : "Del",
+    "Add group" : "Legg til gruppe",
+    "Unlimited" : "Ubegrensa",
+    "Delete \"{folderName}\"?" : "Slett \"{folderName}\"?",
+    "Folder name" : "Katalognavn",
+    "Quota" : "Kvote",
+    "Previous" : "Førre",
+    "User" : "Bruker",
+    "Unknown" : "Ukjend",
+    "None" : "Ingen",
+    "Group folders" : "Gruppemapper"
+},"pluralForm" :"nplurals=2; plural=(n != 1);"
+}

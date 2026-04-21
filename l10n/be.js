@@ -1,0 +1,26 @@
+OC.L10N.register(
+    "groupfolders",
+    {
+    "Team Folders" : "Папкі каманды",
+    "Group" : "Група",
+    "Team" : "Каманда",
+    "Read" : "Чытаць",
+    "Create" : "Стварыць",
+    "Delete" : "Выдаліць",
+    "Share" : "Абагуліць",
+    "You" : "Вы",
+    "Select a user or group" : "Выберыце карыстальніка або групу",
+    "Add group" : "Дадаць групу",
+    "Default" : "Прадвызначаныя",
+    "Delete \"{folderName}\"?" : "Выдаліць \"{folderName}\"?",
+    "Group or team" : "Група або каманда",
+    "Folder name" : "Назва папкі",
+    "Quota" : "Квота",
+    "User" : "Карыстальнік",
+    "Unknown" : "Невядомы",
+    "None" : "Няма",
+    "{displayName} (team)" : "{displayName} (каманда)",
+    "{size} used" : "Выкарыстана {size}",
+    "Group folder" : "Папка групы"
+},
+"nplurals=4; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<12 || n%100>14) ? 1 : n%10==0 || (n%10>=5 && n%10<=9) || (n%100>=11 && n%100<=14)? 2 : 3);");

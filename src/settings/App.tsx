@@ -120,7 +120,8 @@ export class App extends Component<{}, AppState> implements OC.Plugin<OC.Search.
 
 	addGroup(folder: Folder, group: string) {
 		const folders = this.state.folders
-		folder.groups[group] = OC.PERMISSION_ALL
+		// Set default permissions: READ + UPDATE + CREATE + DELETE (without SHARE)
+		folder.groups[group] = OC.PERMISSION_READ | OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE
 		this.setState({ folders })
 		this.api.addGroup(folder.id, group)
 	}

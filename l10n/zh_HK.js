@@ -17,6 +17,7 @@ OC.L10N.register(
     "Team" : "團隊",
     "Team folder" : "團隊資料夾",
     "Read" : "已讀",
+    "Edit" : "編輯",
     "Write" : "寫入",
     "Create" : "建立",
     "Delete" : "刪除",

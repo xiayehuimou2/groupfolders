@@ -41,29 +41,34 @@ export function FolderGroups({groups, allGroups = [], allCircles = [], onAddGrou
 	})
 
 	if (edit) {
-		const setPermissions = (change: number, groupId: string): void => {
-			const newPermissions = groups[groupId] ^ change
-			onSetPermissions(groupId, newPermissions)
+		// Edit permissions: UPDATE + CREATE + DELETE (without SHARE)
+		const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
+		const READ_PERM = OC.PERMISSION_READ;
+		
+		const setPermissions = (change: number, groupId: string, newState: boolean): void => {
+			const currentPerms = groups[groupId] || 0;
+			let newPermissions: number;
+			if (newState) {
+				// Checkbox checked: enable edit permissions and always keep READ
+				newPermissions = (currentPerms | change) | READ_PERM;
+			} else {
+				// Checkbox unchecked: disable edit permissions but always keep READ
+				newPermissions = (currentPerms & ~change) | READ_PERM;
+			}
+			onSetPermissions(groupId, newPermissions);
 		};
 
 		const rows = Object.keys(groups).map((groupId, index) => {
-			const permissions = groups[groupId]
+			const permissions = groups[groupId] || 0;
+			// Check if all edit permission bits are set
+			const allEditEnabled = (permissions & EDIT_PERMS) === EDIT_PERMS;
+			
 			return <tr key={groupId}>
 				<td>{displayNames[index]}</td>
 				<td className="permissions">
 					<input type="checkbox"
-						   onChange={setPermissions.bind(null, OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE, groupId)}
-						   checked={hasPermissions(permissions, (OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE))}/>
-				</td>
-				<td className="permissions">
-					<input type="checkbox"
-						   onChange={setPermissions.bind(null, OC.PERMISSION_SHARE, groupId)}
-						   checked={hasPermissions(permissions, OC.PERMISSION_SHARE)}/>
-				</td>
-				<td className="permissions">
-					<input type="checkbox"
-						   onChange={setPermissions.bind(null, OC.PERMISSION_DELETE, groupId)}
-						   checked={hasPermissions(permissions, (OC.PERMISSION_DELETE))}/>
+						   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPermissions(EDIT_PERMS, groupId, e.target.checked)}
+						   checked={allEditEnabled}/>
 				</td>
 				<td>
 					<a onClick={removeGroup.bind(this, groupId)} className="close-btn"></a>
@@ -73,20 +78,18 @@ export function FolderGroups({groups, allGroups = [], allCircles = [], onAddGrou
 
 
 		return <table className="group-edit"
-					  onClick={event => event.stopPropagation()}>
+				  onClick={event => event.stopPropagation()}>
 			<thead>
 			<tr>
 				<th>{groupHeader}</th>
-				<th>Write</th>
-				<th>Share</th>
-				<th>Delete</th>
+				<th>{t('groupfolders', 'Edit')}</th>
 				<th/>
 			</tr>
 			</thead>
 			<tbody>
 			{rows}
 			<tr>
-				<td colSpan={5}>
+				<td colSpan={3}>
 					<AdminGroupSelect
 						allGroups={allGroups.filter(i => !groups[i.gid])}
 						allCircles={allCircles.filter(i => !groups[i.singleId])}

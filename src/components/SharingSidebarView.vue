@@ -10,122 +10,71 @@
 		</div>
 		<table>
 			<thead>
-				<tr>
-					<th />
-					<th>{{ t('groupfolders', 'Group folder') }}</th>
-					<th v-tooltip="t('groupfolders', 'Read')" class="state-column">
-						{{ t('groupfolders', 'Read') }}
-					</th>
-					<th v-tooltip="t('groupfolders', 'Write')" class="state-column">
-						{{ t('groupfolders', 'Write') }}
-					</th>
-					<th v-if="model.type === 'dir'" v-tooltip="t('groupfolders', 'Create')" class="state-column">
-						{{ t('groupfolders', 'Create') }}
-					</th>
-					<th v-tooltip="t('groupfolders', 'Delete')" class="state-column">
-						{{ t('groupfolders', 'Delete') }}
-					</th>
-					<th v-tooltip="t('groupfolders', 'Share')" class="state-column">
-						{{ t('groupfolders', 'Share') }}
-					</th>
-					<th class="state-column" />
-				</tr>
+			<tr>
+				<th />
+				<th>{{ t('groupfolders', 'Group folder') }}</th>
+				<th v-tooltip="t('groupfolders', 'Read')" class="state-column">
+					{{ t('groupfolders', 'Read') }}
+				</th>
+				<th v-tooltip="t('groupfolders', 'Edit')" class="state-column">
+					{{ t('groupfolders', 'Edit') }}
+				</th>
+				<th class="state-column" />
+			</tr>
 			</thead>
 			<tbody v-if="!isAdmin">
-				<tr>
-					<td>
-						<NcAvatar user="admin" :size="24" />
-					</td>
-					<td class="username">
-						{{ t('groupfolders', 'You') }}
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_READ, {
-								permissions: model.permissions,
-								mask: 31,
-							})"
-							:read-only="true" />
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_UPDATE, {
-								permissions: model.permissions,
-								mask: 31,
-							})"
-							:read-only="true" />
-					</td>
-					<td v-if="model.type === 'dir'" class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_CREATE, {
-								permissions: model.permissions,
-								mask: 31,
-							})"
-							:read-only="true" />
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_DELETE, {
-								permissions: model.permissions,
-								mask: 31,
-							})"
-							:read-only="true" />
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_SHARE, {
-								permissions: model.permissions,
-								mask: 31,
-							})"
-							:read-only="true" />
-					</td>
-				</tr>
+			<tr>
+				<td>
+					<NcAvatar user="admin" :size="24" />
+				</td>
+				<td class="username">
+					{{ t('groupfolders', 'You') }}
+				</td>
+				<td class="state-column">
+					<AclStateButton :state="getState(OC.PERMISSION_READ, {
+							permissions: model.permissions,
+							mask: 31,
+						})"
+						:read-only="true" />
+				</td>
+				<td class="state-column">
+					<AclStateButton :state="getEditState({ permissions: model.permissions, mask: 31 })"
+						:read-only="true" />
+				</td>
+			</tr>
 			</tbody>
 			<tbody v-else>
-				<tr v-for="item in list" :key="item.mappingType + '-' + item.mappingId">
-					<td>
-						<NcAvatar :user="item.mappingId" :is-no-user="item.mappingType !== 'user'" :size="24" />
-					</td>
-					<td v-tooltip="getFullDisplayName(item.mappingDisplayName, item.mappingType)" class="username">
-						{{ getFullDisplayName(item.mappingDisplayName, item.mappingType) }}
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_READ, item)"
-							:inherited="item.inherited"
-							:disabled="loading"
-							@update="changePermission(item, OC.PERMISSION_READ, $event)" />
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_UPDATE, item)"
-							:inherited="item.inherited"
-							:disabled="loading"
-							@update="changePermission(item, OC.PERMISSION_UPDATE, $event)" />
-					</td>
-					<td v-if="model.type === 'dir'" class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_CREATE, item)"
-							:inherited="item.inherited"
-							:disabled="loading"
-							@update="changePermission(item, OC.PERMISSION_CREATE, $event)" />
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_DELETE, item)"
-							:inherited="item.inherited"
-							:disabled="loading"
-							@update="changePermission(item, OC.PERMISSION_DELETE, $event)" />
-					</td>
-					<td class="state-column">
-						<AclStateButton :state="getState(OC.PERMISSION_SHARE, item)"
-							:inherited="item.inherited"
-							:disabled="loading"
-							@update="changePermission(item, OC.PERMISSION_SHARE, $event)" />
-					</td>
-					<td class="state-column">
-						<NcButton v-if="item.inherited === false"
-							type="tertiary"
-							:v-tooltip="t('groupfolders', 'Remove access rule')"
-							:aria-label="t('groupfolders', 'Remove access rule')"
-							@click="removeAcl(item)">
-							<template #icon>
-								<Delete :size="16" />
-							</template>
-						</NcButton>
-					</td>
-				</tr>
+			<tr v-for="item in list" :key="item.mappingType + '-' + item.mappingId">
+				<td>
+					<NcAvatar :user="item.mappingId" :is-no-user="item.mappingType !== 'user'" :size="24" />
+				</td>
+				<td v-tooltip="getFullDisplayName(item.mappingDisplayName, item.mappingType)" class="username">
+					{{ getFullDisplayName(item.mappingDisplayName, item.mappingType) }}
+				</td>
+				<td class="state-column">
+					<AclStateButton :state="getState(OC.PERMISSION_READ, item)"
+						:inherited="item.inherited"
+						:disabled="loading"
+						@update="changePermission(item, OC.PERMISSION_READ, $event)" />
+				</td>
+				<td class="state-column">
+					<AclStateButton :state="getEditState(item)"
+						:inherited="item.inherited"
+						:disabled="loading"
+						@update="changeEditPermission(item, $event)" />
+				</td>
+				<td class="state-column">
+					<NcButton v-if="item.inherited === false"
+						type="tertiary"
+						:v-tooltip="t('groupfolders', 'Remove access rule')"
+						:aria-label="t('groupfolders', 'Remove access rule')"
+						@click="removeAcl(item)">
+						<template #icon>
+							<Delete :size="16" />
+						</template>
+					</NcButton>
+				</td>
+			</tr>
 			</tbody>
 		</table>
 		<NcButton v-if="isAdmin && !loading && !showAclCreate"
@@ -232,6 +181,39 @@ export default {
 						return STATES.INHERIT_DEFAULT
 					}
 				}
+			}
+		},
+		getEditState() {
+			return (item) => {
+				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
+				const allEditMasked = (item.mask & EDIT_PERMS) === EDIT_PERMS;
+				
+				if (allEditMasked) {
+					const allEditPermitted = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+					return allEditPermitted ? STATES.SELF_ALLOW : STATES.SELF_DENY;
+				}
+				
+				// Check each edit permission bit individually
+				const permsToCheck = [OC.PERMISSION_UPDATE, OC.PERMISSION_CREATE, OC.PERMISSION_DELETE];
+				for (const perm of permsToCheck) {
+					const masked = (item.mask & perm) !== 0;
+					if (masked) {
+						continue;
+					}
+					const inheritMasked = (item.inheritedMask & perm) !== 0;
+					const inheritPermitted = (item.inheritedPermissions & perm) !== 0;
+					if (inheritMasked) {
+						return inheritPermitted ? STATES.INHERIT_ALLOW : STATES.INHERIT_DENY;
+					}
+				}
+				
+				// If no inherited permission is explicitly set, check if all inherited permissions are allowed
+				const allInheritEditPermitted = (item.inheritedPermissions & EDIT_PERMS) === EDIT_PERMS;
+				if (allInheritEditPermitted) {
+					return STATES.INHERIT_ALLOW;
+				}
+				
+				return STATES.INHERIT_DENY;
 			}
 		},
 	},
@@ -375,6 +357,45 @@ export default {
 			try {
 				await client.propPatch(this.model, this.list.filter(rule => !rule.inherited))
 				logger.debug('Permissions updated successfully')
+				// Reload ACLs to ensure UI reflects the latest permissions
+				await this.loadAcls()
+			} catch (error) {
+				logger.error('Failed to save changes:', { error })
+				Vue.set(this.list, index, itemRestorePoint)
+				showError(error)
+			} finally {
+				this.loading = false
+			}
+		},
+		async changeEditPermission(item, $event) {
+			const index = this.list.indexOf(item)
+			const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
+			const itemRestorePoint = item.clone()
+			item = item.clone()
+			
+			if ($event === STATES.SELF_ALLOW) {
+				// Set all edit permission bits in mask and enable them
+				item.mask |= EDIT_PERMS
+				item.permissions |= EDIT_PERMS
+				item.inherited = false
+			} else if ($event === STATES.SELF_DENY) {
+				// Set all edit permission bits in mask and disable them
+				item.mask |= EDIT_PERMS
+				item.permissions &= ~EDIT_PERMS
+				item.inherited = false
+			} else {
+				// Inherit permissions: clear all edit permission bits from mask
+				item.mask &= ~EDIT_PERMS
+				item.inherited = false
+			}
+			
+			Vue.set(this.list, index, item)
+			this.loading = true
+			try {
+				await client.propPatch(this.model, this.list.filter(rule => !rule.inherited))
+				logger.debug('Edit permissions updated successfully')
+				// Reload ACLs to ensure UI reflects the latest permissions
+				await this.loadAcls()
 			} catch (error) {
 				logger.error('Failed to save changes:', { error })
 				Vue.set(this.list, index, itemRestorePoint)

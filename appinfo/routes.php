@@ -89,4 +89,19 @@ return ['routes' => [
 		'url' => '/delegation/authorized-groups',
 		'verb' => 'GET',
 	],
+	[
+		'name' => 'Folder#getFileAcls',
+		'url' => '/folders/{id}/fileAcl',
+		'verb' => 'GET'
+	],
+	[
+		'name' => 'Folder#addFileAcl',
+		'url' => '/folders/{id}/fileAcl',
+		'verb' => 'POST'
+	],
+	[
+		'name' => 'Folder#removeFileAcl',
+		'url' => '/folders/{id}/fileAcl',
+		'verb' => 'DELETE'
+	],
 ]];

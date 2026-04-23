@@ -138,4 +138,35 @@ export class Api {
 		}
 	}
 
+	async getFileAcls(folderId: number, fileId?: number): Promise<any[]> {
+		const params: any = {}
+		if (fileId) {
+			params.fileId = fileId
+		}
+		const response = await axios.get<OCSResponse<any[]>>(this.getUrl(`folders/${folderId}/fileAcl`), { params })
+		return response.data.ocs.data
+	}
+
+	async addFileAcl(folderId: number, fileId: number, filePath: string, mappingType: string, mappingId: string, permissions: number): Promise<void> {
+		await confirmPassword()
+		await axios.post(this.getUrl(`folders/${folderId}/fileAcl`), {
+			fileId,
+			filePath,
+			mappingType,
+			mappingId,
+			permissions,
+		})
+	}
+
+	async removeFileAcl(folderId: number, fileId: number, mappingType: string, mappingId: string): Promise<void> {
+		await confirmPassword()
+		await axios.delete(this.getUrl(`folders/${folderId}/fileAcl`), {
+			params: {
+				fileId,
+				mappingType,
+				mappingId,
+			},
+		})
+	}
+
 }

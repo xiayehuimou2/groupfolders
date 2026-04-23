@@ -25,6 +25,7 @@ use OCA\GroupFolders\Command\ExpireGroup\ExpireGroupBase;
 use OCA\GroupFolders\Command\ExpireGroup\ExpireGroupTrash;
 use OCA\GroupFolders\Command\ExpireGroup\ExpireGroupVersions;
 use OCA\GroupFolders\Command\ExpireGroup\ExpireGroupVersionsTrash;
+use OCA\GroupFolders\FileAcl\FileAclManager;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCA\GroupFolders\Listeners\CircleDestroyedEventListener;
 use OCA\GroupFolders\Listeners\LoadAdditionalScriptsListener;
@@ -118,7 +119,8 @@ class Application extends App implements IBootstrap {
 				$c->get(IDBConnection::class),
 				$c->get(ICacheFactory::class)->createLocal("groupfolders"),
 				$allowRootShare,
-				$enableEncryption
+				$enableEncryption,
+				$c->get(FileAclManager::class),
 			);
 		});
 

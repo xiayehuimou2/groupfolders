@@ -10,30 +10,68 @@ namespace OCA\GroupFolders\ACL;
 
 use Icewind\Streams\IteratorDirectory;
 use OC\Files\Storage\Wrapper\Wrapper;
+use OCA\GroupFolders\FileAcl\FileAclManager;
 use OCP\Constants;
+use OCP\IUser;
 
 class ACLStorageWrapper extends Wrapper {
 	/** @var ACLManager */
 	private $aclManager;
 	/** @var bool */
 	private $inShare;
+	private ?FileAclManager $fileAclManager;
+	private int $folderId;
+	private ?IUser $user;
 
 	public function __construct($arguments) {
 		parent::__construct($arguments);
 		$this->aclManager = $arguments['acl_manager'];
 		$this->inShare = $arguments['in_share'];
+		$this->fileAclManager = $arguments['file_acl_manager'] ?? null;
+		$this->folderId = $arguments['folder_id'] ?? 0;
+		$this->user = $arguments['user'] ?? null;
 	}
 
 	private function getACLPermissionsForPath(string $path) {
 		$permissions = $this->aclManager->getACLPermissionsForPath($path);
 
-		// if there is no read permissions, than deny everything
 		if ($this->inShare) {
 			$canRead = $permissions & (Constants::PERMISSION_READ + Constants::PERMISSION_SHARE);
 		} else {
 			$canRead = $permissions & Constants::PERMISSION_READ;
 		}
-		return $canRead ? $permissions : 0;
+
+		if ($canRead) {
+			return $permissions;
+		}
+
+		if ($this->fileAclManager !== null && $this->user !== null) {
+			$fileAclPermissions = $this->getFileAclPermissionsForPath($path);
+			if ($fileAclPermissions > 0) {
+				return $fileAclPermissions;
+			}
+		}
+
+		return 0;
+	}
+
+	private function getFileAclPermissionsForPath(string $path): int {
+		if ($this->fileAclManager === null || $this->user === null) {
+			return 0;
+		}
+
+		$path = ltrim($path, '/');
+
+		$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $path);
+		if ($directPermissions & Constants::PERMISSION_READ) {
+			return $directPermissions;
+		}
+
+		if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $path)) {
+			return Constants::PERMISSION_READ;
+		}
+
+		return 0;
 	}
 
 	private function checkPermissions(string $path, int $permissions) {
@@ -69,7 +107,6 @@ class ACLStorageWrapper extends Wrapper {
 	public function rename($source, $target) {
 		if (strpos($source, $target) === 0) {
 			$part = substr($source, strlen($target));
-			//This is a rename of the transfer file to the original file
 			if (strpos($part, '.ocTransferId') === 0) {
 				return $this->checkPermissions($target, Constants::PERMISSION_CREATE) && parent::rename($source, $target);
 			}
@@ -91,7 +128,8 @@ class ACLStorageWrapper extends Wrapper {
 	}
 
 	public function opendir($path) {
-		if (!$this->checkPermissions($path, Constants::PERMISSION_READ)) {
+		$canRead = $this->checkPermissions($path, Constants::PERMISSION_READ);
+		if (!$canRead) {
 			return false;
 		}
 
@@ -101,6 +139,16 @@ class ACLStorageWrapper extends Wrapper {
 			if ($file !== '.' && $file !== '..') {
 				if ($this->checkPermissions(trim($path . '/' . $file, '/'), Constants::PERMISSION_READ)) {
 					$items[] = $file;
+				}
+			}
+		}
+
+		if ($this->fileAclManager !== null && $this->user !== null) {
+			$cleanPath = ltrim($path, '/');
+			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $cleanPath);
+			foreach ($visibleChildren as $child) {
+				if (!in_array($child, $items) && parent::file_exists($path ? $path . '/' . $child : $child)) {
+					$items[] = $child;
 				}
 			}
 		}
@@ -136,13 +184,6 @@ class ACLStorageWrapper extends Wrapper {
 			&& parent::unlink($path);
 	}
 
-	/**
-	 * When deleting we need to ensure that there is no file inside the folder being deleted that misses delete permissions
-	 * This check is fairly expensive so we only do it for the actual delete and not metadata operations
-	 *
-	 * @param string $path
-	 * @return int
-	 */
 	private function canDeleteTree(string $path): int {
 		return $this->aclManager->getPermissionsForTree($path) & Constants::PERMISSION_DELETE;
 	}
@@ -166,19 +207,12 @@ class ACLStorageWrapper extends Wrapper {
 		return $this->checkPermissions($path, $permissions) ? parent::writeStream($path, $stream, $size) : 0;
 	}
 
-	/**
-	 * get a cache instance for the storage
-	 *
-	 * @param string $path
-	 * @param \OC\Files\Storage\Storage (optional) the storage to pass to the cache
-	 * @return \OCP\Files\Cache\ICache
-	 */
 	public function getCache($path = '', $storage = null) {
 		if (!$storage) {
 			$storage = $this;
 		}
 		$sourceCache = parent::getCache($path, $storage);
-		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare);
+		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare, $this->fileAclManager, $this->folderId, $this->user);
 	}
 
 	public function getMetaData($path) {
@@ -277,11 +311,32 @@ class ACLStorageWrapper extends Wrapper {
 	}
 
 	public function getDirectoryContent($directory): \Traversable {
+		$yielded = [];
 		foreach ($this->getWrapperStorage()->getDirectoryContent($directory) as $data) {
 			$data['scan_permissions'] = isset($data['scan_permissions']) ? $data['scan_permissions'] : $data['permissions'];
-			$data['permissions'] &= $this->getACLPermissionsForPath(rtrim($directory, '/') . '/' . $data['name']);
+			$fullPath = rtrim($directory, '/') . '/' . $data['name'];
+			$data['permissions'] &= $this->getACLPermissionsForPath($fullPath);
 
-			yield $data;
+			if ($data['permissions'] > 0) {
+				$yielded[$data['name']] = true;
+				yield $data;
+			}
+		}
+
+		if ($this->fileAclManager !== null && $this->user !== null) {
+			$cleanPath = ltrim($directory, '/');
+			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $cleanPath);
+			foreach ($visibleChildren as $child) {
+				if (!isset($yielded[$child])) {
+					$childPath = $directory ? $directory . '/' . $child : $child;
+					$metaData = parent::getMetaData($childPath);
+					if ($metaData) {
+						$metaData['scan_permissions'] = $metaData['permissions'];
+						$metaData['permissions'] = $this->getACLPermissionsForPath($childPath);
+						yield $metaData;
+					}
+				}
+			}
 		}
 	}
 }

@@ -7708,6 +7708,74 @@ CREATE INDEX webauthn_uid ON public.oc_webauthn USING btree (uid);
 
 
 --
+-- Name: oc_group_folders_file_acl; Type: TABLE; Schema: public; Owner: nextcloud
+--
+
+CREATE TABLE public.oc_group_folders_file_acl (
+    id bigint NOT NULL,
+    folder_id bigint NOT NULL,
+    file_id bigint NOT NULL,
+    file_path character varying(4000) NOT NULL,
+    mapping_type character varying(16) NOT NULL,
+    mapping_id character varying(64) NOT NULL,
+    permissions smallint NOT NULL DEFAULT 1
+);
+
+
+ALTER TABLE public.oc_group_folders_file_acl OWNER TO nextcloud;
+
+--
+-- Name: oc_group_folders_file_acl_id_seq; Type: SEQUENCE; Schema: public; Owner: nextcloud
+--
+
+CREATE SEQUENCE public.oc_group_folders_file_acl_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.oc_group_folders_file_acl_id_seq OWNER TO nextcloud;
+
+--
+-- Name: oc_group_folders_file_acl_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: nextcloud
+--
+
+ALTER SEQUENCE public.oc_group_folders_file_acl_id_seq OWNED BY public.oc_group_folders_file_acl.id;
+
+--
+-- Name: oc_group_folders_file_acl id; Type: DEFAULT; Schema: public; Owner: nextcloud
+--
+
+ALTER TABLE ONLY public.oc_group_folders_file_acl ALTER COLUMN id SET DEFAULT nextval('public.oc_group_folders_file_acl_id_seq'::regclass);
+
+--
+-- Name: oc_group_folders_file_acl oc_group_folders_file_acl_pkey; Type: CONSTRAINT; Schema: public; Owner: nextcloud
+--
+
+ALTER TABLE ONLY public.oc_group_folders_file_acl
+    ADD CONSTRAINT oc_group_folders_file_acl_pkey PRIMARY KEY (id);
+
+--
+-- Name: groups_folder_file_acl_unique; Type: INDEX; Schema: public; Owner: nextcloud
+--
+
+CREATE UNIQUE INDEX groups_folder_file_acl_unique ON public.oc_group_folders_file_acl USING btree (file_id, mapping_type, mapping_id);
+
+--
+-- Name: groups_folder_file_acl_folder_mapping; Type: INDEX; Schema: public; Owner: nextcloud
+--
+
+CREATE INDEX groups_folder_file_acl_folder_mapping ON public.oc_group_folders_file_acl USING btree (folder_id, mapping_type, mapping_id);
+
+--
+-- Name: groups_folder_file_acl_path; Type: INDEX; Schema: public; Owner: nextcloud
+--
+
+CREATE INDEX groups_folder_file_acl_path ON public.oc_group_folders_file_acl USING btree (folder_id, file_path);
+
+--
 -- PostgreSQL database dump complete
 --
 

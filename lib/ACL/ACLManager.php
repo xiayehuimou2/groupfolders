@@ -255,6 +255,51 @@ class ACLManager {
 		$this->ruleManager->getRulesForFilesByParent($this->user, $this->getRootStorageId(), $path);
 	}
 
+	public function hasReadPermissionInSubtree(string $path): bool {
+		$path = ltrim($path, '/');
+		$rules = $this->ruleManager->getRulesForPrefix($this->user, $this->getRootStorageId(), $path);
+
+		foreach ($rules as $rulePath => $rulesForPath) {
+			$permissions = $this->getACLPermissionsForPath($rulePath);
+			if ($permissions & Constants::PERMISSION_READ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	public function getVisibleChildren(string $parentPath): array {
+		$parentPath = ltrim($parentPath, '/');
+		$rules = $this->ruleManager->getRulesForPrefix($this->user, $this->getRootStorageId(), $parentPath);
+
+		$children = [];
+		$prefix = $parentPath === '' ? '' : $parentPath . '/';
+		$prefixLen = strlen($prefix);
+
+		foreach ($rules as $rulePath => $rulesForPath) {
+			$permissions = $this->getACLPermissionsForPath($rulePath);
+			if (!($permissions & Constants::PERMISSION_READ)) {
+				continue;
+			}
+
+			if ($prefix === '') {
+				$remaining = $rulePath;
+			} elseif (str_starts_with($rulePath, $prefix)) {
+				$remaining = substr($rulePath, $prefixLen);
+			} else {
+				continue;
+			}
+
+			$parts = explode('/', $remaining);
+			if (!empty($parts[0])) {
+				$children[$parts[0]] = true;
+			}
+		}
+
+		return array_keys($children);
+	}
+
 	/**
 	 * Filter a list to only the rules applicable to the current user
 	 *

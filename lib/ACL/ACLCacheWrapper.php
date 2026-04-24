@@ -23,6 +23,19 @@ class ACLCacheWrapper extends CacheWrapper {
 	private int $folderId;
 	private ?IUser $user;
 
+	private function getRelativePath(string $path): string {
+		$path = ltrim($path, '/');
+		$rootPrefix = '__groupfolders/' . $this->folderId;
+		if ($path === $rootPrefix) {
+			return '';
+		}
+		$rootPrefixSlash = $rootPrefix . '/';
+		if (str_starts_with($path, $rootPrefixSlash)) {
+			return substr($path, strlen($rootPrefixSlash));
+		}
+		return $path;
+	}
+
 	private function getACLPermissionsForPath(string $path, array $rules = []) {
 		if ($rules) {
 			$permissions = $this->aclManager->getPermissionsForPathFromRules($path, $rules);
@@ -42,16 +55,20 @@ class ACLCacheWrapper extends CacheWrapper {
 		}
 
 		if ($this->fileAclManager !== null && $this->user !== null) {
-			$cleanPath = ltrim($path, '/');
+			$relativePath = $this->getRelativePath($path);
 
-			$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $cleanPath);
+			$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $relativePath);
 			if ($directPermissions & Constants::PERMISSION_READ) {
 				return $directPermissions;
 			}
 
-			if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $cleanPath)) {
+			if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $relativePath)) {
 				return Constants::PERMISSION_READ;
 			}
+		}
+
+		if ($this->aclManager->hasReadPermissionInSubtree(ltrim($path, '/'))) {
+			return Constants::PERMISSION_READ;
 		}
 
 		return 0;
@@ -92,7 +109,8 @@ class ACLCacheWrapper extends CacheWrapper {
 				$parentDir = '';
 			}
 
-			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $parentDir);
+			$relativeParentDir = $this->getRelativePath($parentDir);
+			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $relativeParentDir);
 
 			$existingNames = array_map(function ($entry) {
 				return $entry['name'] ?? basename($entry['path'] ?? '');
@@ -105,6 +123,35 @@ class ACLCacheWrapper extends CacheWrapper {
 			}
 
 			foreach ($visibleChildren as $child) {
+				if (!in_array($child, $existingNames) && isset($allByName[$child])) {
+					$entry = $this->formatCacheEntry($allByName[$child], $rules);
+					if ($entry) {
+						$filtered[] = $entry;
+					}
+				}
+			}
+		}
+
+		if (!empty($results)) {
+			$parentPath = $results[0]->getPath();
+			$parentDir = dirname($parentPath);
+			if ($parentDir === '.' || $parentDir === '/') {
+				$parentDir = '';
+			}
+
+			$aclVisibleChildren = $this->aclManager->getVisibleChildren(ltrim($parentDir, '/'));
+
+			$existingNames = array_map(function ($entry) {
+				return $entry['name'] ?? basename($entry['path'] ?? '');
+			}, $filtered);
+
+			$allResults = $this->getCache()->getFolderContentsById($fileId);
+			$allByName = [];
+			foreach ($allResults as $r) {
+				$allByName[$r['name']] = $r;
+			}
+
+			foreach ($aclVisibleChildren as $child) {
 				if (!in_array($child, $existingNames) && isset($allByName[$child])) {
 					$entry = $this->formatCacheEntry($allByName[$child], $rules);
 					if ($entry) {

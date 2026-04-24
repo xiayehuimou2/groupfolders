@@ -224,8 +224,11 @@ class MountProvider implements IMountProvider {
 				'folder_id' => $id,
 				'user' => $user,
 			]);
-			if ($aclRootPermissions === 0 && $this->fileAclManager->isPathDirectoryVisible($user, $id, '')) {
-				$aclRootPermissions = Constants::PERMISSION_READ;
+			if ($aclRootPermissions === 0) {
+				if ($this->fileAclManager->isPathDirectoryVisible($user, $id, '')
+					|| $aclManager->hasReadPermissionInSubtree($rootPath)) {
+					$aclRootPermissions = Constants::PERMISSION_READ;
+				}
 			}
 			$cacheEntry['permissions'] &= $aclRootPermissions;
 		}

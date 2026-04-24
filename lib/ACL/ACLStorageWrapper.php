@@ -32,6 +32,19 @@ class ACLStorageWrapper extends Wrapper {
 		$this->user = $arguments['user'] ?? null;
 	}
 
+	private function getRelativePath(string $path): string {
+		$path = ltrim($path, '/');
+		$rootPrefix = '__groupfolders/' . $this->folderId;
+		if ($path === $rootPrefix) {
+			return '';
+		}
+		$rootPrefixSlash = $rootPrefix . '/';
+		if (str_starts_with($path, $rootPrefixSlash)) {
+			return substr($path, strlen($rootPrefixSlash));
+		}
+		return $path;
+	}
+
 	private function getACLPermissionsForPath(string $path) {
 		$permissions = $this->aclManager->getACLPermissionsForPath($path);
 
@@ -52,6 +65,10 @@ class ACLStorageWrapper extends Wrapper {
 			}
 		}
 
+		if ($this->aclManager->hasReadPermissionInSubtree(ltrim($path, '/'))) {
+			return Constants::PERMISSION_READ;
+		}
+
 		return 0;
 	}
 
@@ -60,14 +77,14 @@ class ACLStorageWrapper extends Wrapper {
 			return 0;
 		}
 
-		$path = ltrim($path, '/');
+		$relativePath = $this->getRelativePath($path);
 
-		$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $path);
+		$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $relativePath);
 		if ($directPermissions & Constants::PERMISSION_READ) {
 			return $directPermissions;
 		}
 
-		if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $path)) {
+		if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $relativePath)) {
 			return Constants::PERMISSION_READ;
 		}
 
@@ -144,12 +161,19 @@ class ACLStorageWrapper extends Wrapper {
 		}
 
 		if ($this->fileAclManager !== null && $this->user !== null) {
-			$cleanPath = ltrim($path, '/');
-			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $cleanPath);
+			$relativePath = $this->getRelativePath($path);
+			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $relativePath);
 			foreach ($visibleChildren as $child) {
 				if (!in_array($child, $items) && parent::file_exists($path ? $path . '/' . $child : $child)) {
 					$items[] = $child;
 				}
+			}
+		}
+
+		$aclVisibleChildren = $this->aclManager->getVisibleChildren(ltrim($path, '/'));
+		foreach ($aclVisibleChildren as $child) {
+			if (!in_array($child, $items) && parent::file_exists($path ? $path . '/' . $child : $child)) {
+				$items[] = $child;
 			}
 		}
 
@@ -324,8 +348,8 @@ class ACLStorageWrapper extends Wrapper {
 		}
 
 		if ($this->fileAclManager !== null && $this->user !== null) {
-			$cleanPath = ltrim($directory, '/');
-			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $cleanPath);
+			$relativePath = $this->getRelativePath($directory);
+			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $relativePath);
 			foreach ($visibleChildren as $child) {
 				if (!isset($yielded[$child])) {
 					$childPath = $directory ? $directory . '/' . $child : $child;
@@ -333,6 +357,21 @@ class ACLStorageWrapper extends Wrapper {
 					if ($metaData) {
 						$metaData['scan_permissions'] = $metaData['permissions'];
 						$metaData['permissions'] = $this->getACLPermissionsForPath($childPath);
+						yield $metaData;
+					}
+				}
+			}
+		}
+
+		$aclVisibleChildren = $this->aclManager->getVisibleChildren(ltrim($directory, '/'));
+		foreach ($aclVisibleChildren as $child) {
+			if (!isset($yielded[$child])) {
+				$childPath = $directory ? $directory . '/' . $child : $child;
+				$metaData = parent::getMetaData($childPath);
+				if ($metaData) {
+					$metaData['scan_permissions'] = $metaData['permissions'];
+					$metaData['permissions'] = $this->getACLPermissionsForPath($childPath);
+					if ($metaData['permissions'] > 0) {
 						yield $metaData;
 					}
 				}

@@ -4,6 +4,40 @@
 -->
 <template>
 	<div v-if="aclEnabled && !loading" id="groupfolder-acl-container">
+		<div class="acl-add-row">
+			<NcButton v-if="isAdmin && !loading && !showAclCreate"
+				@click="toggleAclCreate">
+				<template #icon>
+					<Plus :size="16" />
+				</template>
+				{{ t('groupfolders', 'Add advanced permission rule') }}
+			</NcButton>
+			<div v-if="isAdmin && !loading && showAclCreate" class="acl-select-wrapper">
+				<NcSelect
+					ref="select"
+					v-model="value"
+					:options="options"
+					:loading="isSearching"
+					:filterable="false"
+					:placeholder="t('groupfolders', 'Select a user or group')"
+					:get-option-key="() => 'unique'"
+					@input="createAcl"
+					@search="searchMappings">
+					<template #option="option">
+						<NcAvatar :user="option.id" :is-no-user="option.type !== 'user'" />
+						{{ option.label }}
+					</template>
+				</NcSelect>
+				<NcButton
+					type="tertiary"
+					:aria-label="t('groupfolders', 'Cancel')"
+					@click="toggleAclCreate">
+					<template #icon>
+						<Close :size="16" />
+					</template>
+				</NcButton>
+			</div>
+		</div>
 		<div class="groupfolder-entry">
 			<div class="avatar icon-group-white" />
 			<span class="username" />
@@ -77,28 +111,6 @@
 			</tr>
 			</tbody>
 		</table>
-		<NcButton v-if="isAdmin && !loading && !showAclCreate"
-			@click="toggleAclCreate">
-			<template #icon>
-				<Plus :size="16" />
-			</template>
-			{{ t('groupfolders', 'Add advanced permission rule') }}
-		</NcButton>
-		<NcSelect v-if="isAdmin && !loading && showAclCreate"
-			ref="select"
-			v-model="value"
-			:options="options"
-			:loading="isSearching"
-			:filterable="false"
-			:placeholder="t('groupfolders', 'Select a user or group')"
-			:get-option-key="() => 'unique'"
-			@input="createAcl"
-			@search="searchMappings">
-			<template #option="option">
-				<NcAvatar :user="option.id" :is-no-user="option.type !== 'user'" />
-				{{ option.label }}
-			</template>
-		</NcSelect>
 	</div>
 </template>
 
@@ -111,6 +123,7 @@ import NcButton from '@nextcloud/vue/dist/Components/NcButton.js'
 import NcSelect from '@nextcloud/vue/dist/Components/NcSelect.js'
 import Tooltip from '@nextcloud/vue/dist/Directives/Tooltip.js'
 import Vue from 'vue'
+import Close from 'vue-material-design-icons/Close.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import logger from '../services/logger.ts'
@@ -131,6 +144,7 @@ export default {
 		NcSelect,
 		NcButton,
 		AclStateButton,
+		Close,
 		Plus,
 		Delete,
 	},
@@ -504,5 +518,23 @@ export default {
 	.multiselect {
 		margin-left: 44px;
 		width: calc(100% - 44px);
+	}
+
+	.acl-add-row {
+		min-height: 44px;
+		margin-bottom: 5px;
+		display: flex;
+		align-items: center;
+	}
+
+	.acl-select-wrapper {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		width: 100%;
+	}
+
+	.acl-select-wrapper .v-select {
+		flex: 1;
 	}
 </style>

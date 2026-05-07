@@ -28,6 +28,7 @@ use OCA\GroupFolders\Command\ExpireGroup\ExpireGroupVersionsTrash;
 use OCA\GroupFolders\FileAcl\FileAclManager;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCA\GroupFolders\Listeners\CircleDestroyedEventListener;
+use OCA\GroupFolders\Listeners\FileCreatedListener;
 use OCA\GroupFolders\Listeners\LoadAdditionalScriptsListener;
 use OCA\GroupFolders\Listeners\NodeRenamedListener;
 use OCA\GroupFolders\Mount\MountProvider;
@@ -43,6 +44,7 @@ use OCP\AppFramework\Bootstrap\IRegistrationContext;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\Files\Config\IMountProviderCollection;
+use OCP\Files\Events\Node\NodeCreatedEvent;
 use OCP\Files\Events\Node\NodeRenamedEvent;
 use OCP\Files\Folder;
 use OCP\Files\IMimeTypeLoader;
@@ -84,6 +86,7 @@ class Application extends App implements IBootstrap {
 		$context->registerEventListener(BeforeTemplateRenderedEvent::class, LoadAdditionalScriptsListener::class);
 		$context->registerEventListener(CircleDestroyedEvent::class, CircleDestroyedEventListener::class);
 		$context->registerEventListener(NodeRenamedEvent::class, NodeRenamedListener::class);
+		$context->registerEventListener(NodeCreatedEvent::class, FileCreatedListener::class);
 
 		$context->registerService('GroupAppFolder', function (ContainerInterface $c): Folder {
 			/** @var IRootFolder $rootFolder */

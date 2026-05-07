@@ -223,6 +223,7 @@ class MountProvider implements IMountProvider {
 				'file_acl_manager' => $this->fileAclManager,
 				'folder_id' => $id,
 				'user' => $user,
+				'folder_manager' => $this->folderManager,
 			]);
 			if ($aclRootPermissions === 0) {
 				if ($this->fileAclManager->isPathDirectoryVisible($user, $id, '')

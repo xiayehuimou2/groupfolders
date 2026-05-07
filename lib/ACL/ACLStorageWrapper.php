@@ -11,6 +11,7 @@ namespace OCA\GroupFolders\ACL;
 use Icewind\Streams\IteratorDirectory;
 use OC\Files\Storage\Wrapper\Wrapper;
 use OCA\GroupFolders\FileAcl\FileAclManager;
+use OCA\GroupFolders\Folder\FolderManager;
 use OCP\Constants;
 use OCP\IUser;
 
@@ -22,6 +23,7 @@ class ACLStorageWrapper extends Wrapper {
 	private ?FileAclManager $fileAclManager;
 	private int $folderId;
 	private ?IUser $user;
+	private ?FolderManager $folderManager;
 
 	public function __construct($arguments) {
 		parent::__construct($arguments);
@@ -30,6 +32,7 @@ class ACLStorageWrapper extends Wrapper {
 		$this->fileAclManager = $arguments['file_acl_manager'] ?? null;
 		$this->folderId = $arguments['folder_id'] ?? 0;
 		$this->user = $arguments['user'] ?? null;
+		$this->folderManager = $arguments['folder_manager'] ?? null;
 	}
 
 	private function getRelativePath(string $path): string {
@@ -46,6 +49,14 @@ class ACLStorageWrapper extends Wrapper {
 	}
 
 	private function getACLPermissionsForPath(string $path) {
+		// For ACL admins: always return full permissions
+		// Check admin status dynamically to ensure it's always up-to-date
+		if ($this->folderManager !== null && $this->user !== null) {
+			if ($this->folderManager->canManageACL($this->folderId, $this->user)) {
+				return Constants::PERMISSION_ALL;
+			}
+		}
+		
 		$permissions = $this->aclManager->getACLPermissionsForPath($path);
 
 		if ($this->inShare) {
@@ -209,6 +220,12 @@ class ACLStorageWrapper extends Wrapper {
 	}
 
 	private function canDeleteTree(string $path): int {
+		// For ACL admins: always allow deletion
+		if ($this->folderManager !== null && $this->user !== null) {
+			if ($this->folderManager->canManageACL($this->folderId, $this->user)) {
+				return Constants::PERMISSION_DELETE;
+			}
+		}
 		return $this->aclManager->getPermissionsForTree($path) & Constants::PERMISSION_DELETE;
 	}
 
@@ -236,7 +253,7 @@ class ACLStorageWrapper extends Wrapper {
 			$storage = $this;
 		}
 		$sourceCache = parent::getCache($path, $storage);
-		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare, $this->fileAclManager, $this->folderId, $this->user);
+		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare, $this->fileAclManager, $this->folderId, $this->user, $this->folderManager);
 	}
 
 	public function getMetaData($path) {

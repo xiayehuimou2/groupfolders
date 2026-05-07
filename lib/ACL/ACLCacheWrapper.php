@@ -10,6 +10,7 @@ namespace OCA\GroupFolders\ACL;
 
 use OC\Files\Cache\Wrapper\CacheWrapper;
 use OCA\GroupFolders\FileAcl\FileAclManager;
+use OCA\GroupFolders\Folder\FolderManager;
 use OCP\Constants;
 use OCP\Files\Cache\ICache;
 use OCP\Files\Cache\ICacheEntry;
@@ -22,6 +23,7 @@ class ACLCacheWrapper extends CacheWrapper {
 	private ?FileAclManager $fileAclManager;
 	private int $folderId;
 	private ?IUser $user;
+	private ?FolderManager $folderManager;
 
 	private function getRelativePath(string $path): string {
 		$path = ltrim($path, '/');
@@ -37,6 +39,13 @@ class ACLCacheWrapper extends CacheWrapper {
 	}
 
 	private function getACLPermissionsForPath(string $path, array $rules = []) {
+		// For ACL admins: always return full permissions
+		if ($this->folderManager !== null && $this->user !== null) {
+			if ($this->folderManager->canManageACL($this->folderId, $this->user)) {
+				return Constants::PERMISSION_ALL;
+			}
+		}
+		
 		if ($rules) {
 			$permissions = $this->aclManager->getPermissionsForPathFromRules($path, $rules);
 		} else {
@@ -74,13 +83,14 @@ class ACLCacheWrapper extends CacheWrapper {
 		return 0;
 	}
 
-	public function __construct(ICache $cache, ACLManager $aclManager, bool $inShare, ?FileAclManager $fileAclManager = null, int $folderId = 0, ?IUser $user = null) {
+	public function __construct(ICache $cache, ACLManager $aclManager, bool $inShare, ?FileAclManager $fileAclManager = null, int $folderId = 0, ?IUser $user = null, ?FolderManager $folderManager = null) {
 		parent::__construct($cache);
 		$this->aclManager = $aclManager;
 		$this->inShare = $inShare;
 		$this->fileAclManager = $fileAclManager;
 		$this->folderId = $folderId;
 		$this->user = $user;
+		$this->folderManager = $folderManager;
 	}
 
 	protected function formatCacheEntry($entry, array $rules = []) {
@@ -186,6 +196,8 @@ class ACLCacheWrapper extends CacheWrapper {
 		$paths = array_map(function (ICacheEntry $entry) {
 			return $entry->getPath();
 		}, $entries);
+		// ACLManager.getACLPermissionsForPath already handles explicit inheritance
+		// by only using rules for the exact path, not parent paths
 		return $this->aclManager->getRelevantRulesForPath($paths, false);
 	}
 }

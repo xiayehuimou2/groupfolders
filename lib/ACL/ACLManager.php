@@ -145,7 +145,18 @@ class ACLManager {
 
 	public function getACLPermissionsForPath(string $path): int {
 		$path = ltrim($path, '/');
-		$rules = $this->getRules($this->getRelevantPaths($path));
+		
+		// For explicit inheritance: only use rules directly on this path, not parent paths
+		// This means permissions are copied at creation time but don't dynamically inherit
+		$rules = $this->getRules([$path]);
+		
+		// If no rules exist for this path:
+		// - For regular users: return 0 (no permissions) - folder should be hidden
+		// - For ACL admins: This is handled by GroupFolderStorage which grants full access
+		//   to users who can manage ACL
+		if (empty($rules[$path])) {
+			return 0;
+		}
 
 		return $this->calculatePermissionsForPath($rules);
 	}
@@ -157,7 +168,9 @@ class ACLManager {
 	 */
 	public function testACLPermissionsForPath(string $path, array $newRules): int {
 		$path = ltrim($path, '/');
-		$rules = $this->getRules($this->getRelevantPaths($path));
+		
+		// For explicit inheritance: only use rules directly on this path
+		$rules = $this->getRules([$path]);
 
 		$rules[$path] = $this->filterApplicableRulesToUser($newRules);
 
@@ -171,9 +184,15 @@ class ACLManager {
 	 */
 	public function getPermissionsForPathFromRules(string $path, array $rules): int {
 		$path = ltrim($path, '/');
-		$relevantPaths = $this->getRelevantPaths($path);
-		$rules = array_intersect_key($rules, array_flip($relevantPaths));
-		return $this->calculatePermissionsForPath($rules);
+		
+		// For explicit inheritance: only use rules directly on this path
+		// Filter to only include rules for the exact path
+		$pathRules = [];
+		if (isset($rules[$path])) {
+			$pathRules[$path] = $rules[$path];
+		}
+		
+		return $this->calculatePermissionsForPath($pathRules);
 	}
 
 	/**

@@ -339,11 +339,14 @@ export default {
 				list.splice(index, 1)
 			}
 			client.propPatch(this.model, list.filter(rule => !rule.inherited)).then(() => {
+				// For explicit inheritance: just remove the rule, don't restore inherited ACL
+				// The permission should truly disappear, not be restored from parent
 				this.list.splice(index, 1)
-				const inheritedAcl = this.inheritedAclsById[rule.getUniqueMappingIdentifier()]
-				if (inheritedAcl != null) {
-					this.list.splice(index, 0, inheritedAcl)
-				}
+				// DO NOT insert inherited ACL - we want explicit inheritance only
+				// const inheritedAcl = this.inheritedAclsById[rule.getUniqueMappingIdentifier()]
+				// if (inheritedAcl != null) {
+				// 	this.list.splice(index, 0, inheritedAcl)
+				// }
 			})
 
 		},

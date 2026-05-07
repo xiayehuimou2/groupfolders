@@ -161,13 +161,15 @@ function patchFilesClient(client) {
 		data.acl = parseAclList(acls)
 		data.inheritedAcls = parseAclList(inheritedAcls)
 
-		data.acl.map((acl) => {
-			const inheritedAcl = data.inheritedAcls.find((inheritedAclRule) => inheritedAclRule.mappingType === acl.mappingType && inheritedAclRule.mappingId === acl.mappingId)
-			if (inheritedAcl) {
-				acl.permissions = (acl.permissions & acl.mask) | (inheritedAcl.permissions & ~acl.mask)
-			}
-			return acl
-		})
+		// For explicit inheritance: DO NOT merge inherited ACL permissions
+		// The ACL should only use its own explicit permissions, not inherit from parent
+		// data.acl.map((acl) => {
+		// 	const inheritedAcl = data.inheritedAcls.find((inheritedAclRule) => inheritedAclRule.mappingType === acl.mappingType && inheritedAclRule.mappingId === acl.mappingId)
+		// 	if (inheritedAcl) {
+		// 		acl.permissions = (acl.permissions & acl.mask) | (inheritedAcl.permissions & ~acl.mask)
+		// 	}
+		// 	return acl
+		// })
 		return data
 	})
 
@@ -198,6 +200,8 @@ class AclDavService {
 					)
 					aclsById[acl.getUniqueMappingIdentifier()] = acl
 				}
+				// For explicit inheritance: DO NOT automatically add inherited ACLs to the list
+				// Only track them in inheritedAclsById for reference, but don't display them
 				for (const i in fileInfo.inheritedAcls) {
 					const acl = new Rule()
 					acl.fromValues(
@@ -210,16 +214,16 @@ class AclDavService {
 					)
 					const id = acl.getUniqueMappingIdentifier()
 					inheritedAclsById[id] = acl
-					if (aclsById[id] == null) {
-						aclsById[id] = acl
-
-						aclsById[id].inheritedMask = acl.mask
-						aclsById[id].inheritedPermissions = acl.permissions
-						aclsById[id].mask = 0
-					} else {
-						aclsById[id].inheritedMask = acl.mask
-						aclsById[id].inheritedPermissions = acl.permissions
-					}
+					// DO NOT add inherited ACL to aclsById - we want explicit inheritance only
+					// if (aclsById[id] == null) {
+					// 	aclsById[id] = acl
+					// 	aclsById[id].inheritedMask = acl.mask
+					// 	aclsById[id].inheritedPermissions = acl.permissions
+					// 	aclsById[id].mask = 0
+					// } else {
+					// 	aclsById[id].inheritedMask = acl.mask
+					// 	aclsById[id].inheritedPermissions = acl.permissions
+					// }
 				}
 				return {
 					acls: Object.values(aclsById),

@@ -258,6 +258,30 @@ class RuleManager {
 		return $this->rulesByPath($rows);
 	}
 
+	/**
+	 * Get all ACL rules for a specific file/folder by its ID
+	 *
+	 * @param int $fileId The file/folder ID
+	 * @return Rule[] Array of rules for the given file ID
+	 */
+	public function getRulesForFileId(int $fileId): array {
+		$query = $this->connection->getQueryBuilder();
+		$query->select(['fileid', 'mapping_type', 'mapping_id', 'mask', 'permissions'])
+			->from('group_folders_acl')
+			->where($query->expr()->eq('fileid', $query->createNamedParameter($fileId, IQueryBuilder::PARAM_INT)));
+
+		$rows = $query->executeQuery()->fetchAll();
+
+		$result = [];
+		foreach ($rows as $row) {
+			$rule = $this->createRule($row);
+			if ($rule) {
+				$result[] = $rule;
+			}
+		}
+		return $result;
+	}
+
 	private function hasRule(IUserMapping $mapping, int $fileId): bool {
 		$query = $this->connection->getQueryBuilder();
 		$query->select('fileid')

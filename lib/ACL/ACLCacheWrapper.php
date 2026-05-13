@@ -9,96 +9,63 @@ declare(strict_types=1);
 namespace OCA\GroupFolders\ACL;
 
 use OC\Files\Cache\Wrapper\CacheWrapper;
-use OCA\GroupFolders\FileAcl\FileAclManager;
-use OCA\GroupFolders\Folder\FolderManager;
 use OCP\Constants;
 use OCP\Files\Cache\ICache;
 use OCP\Files\Cache\ICacheEntry;
 use OCP\Files\Search\ISearchQuery;
-use OCP\IUser;
 
 class ACLCacheWrapper extends CacheWrapper {
 	private ACLManager $aclManager;
 	private bool $inShare;
-	private ?FileAclManager $fileAclManager;
-	private int $folderId;
-	private ?IUser $user;
-	private ?FolderManager $folderManager;
-
-	private function getRelativePath(string $path): string {
-		$path = ltrim($path, '/');
-		$rootPrefix = '__groupfolders/' . $this->folderId;
-		if ($path === $rootPrefix) {
-			return '';
-		}
-		$rootPrefixSlash = $rootPrefix . '/';
-		if (str_starts_with($path, $rootPrefixSlash)) {
-			return substr($path, strlen($rootPrefixSlash));
-		}
-		return $path;
-	}
 
 	private function getACLPermissionsForPath(string $path, array $rules = []) {
-		// For ACL admins: always return full permissions
-		if ($this->folderManager !== null && $this->user !== null) {
-			if ($this->folderManager->canManageACL($this->folderId, $this->user)) {
-				return Constants::PERMISSION_ALL;
-			}
-		}
-		
 		if ($rules) {
 			$permissions = $this->aclManager->getPermissionsForPathFromRules($path, $rules);
 		} else {
 			$permissions = $this->aclManager->getACLPermissionsForPath($path);
 		}
 
+		// if there is no read permissions, than deny everything
 		if ($this->inShare) {
 			$minPermissions = Constants::PERMISSION_READ + Constants::PERMISSION_SHARE;
 		} else {
 			$minPermissions = Constants::PERMISSION_READ;
 		}
 		$canRead = ($permissions & $minPermissions) === $minPermissions;
-
-		if ($canRead) {
-			return $permissions;
-		}
-
-		if ($this->fileAclManager !== null && $this->user !== null) {
-			$relativePath = $this->getRelativePath($path);
-
-			$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $relativePath);
-			if ($directPermissions & Constants::PERMISSION_READ) {
-				return $directPermissions;
-			}
-
-			if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $relativePath)) {
-				return Constants::PERMISSION_READ;
-			}
-		}
-
-		if ($this->aclManager->hasReadPermissionInSubtree(ltrim($path, '/'))) {
-			return Constants::PERMISSION_READ;
-		}
-
-		return 0;
+		return $canRead ? $permissions : 0;
 	}
 
-	public function __construct(ICache $cache, ACLManager $aclManager, bool $inShare, ?FileAclManager $fileAclManager = null, int $folderId = 0, ?IUser $user = null, ?FolderManager $folderManager = null) {
+	public function __construct(ICache $cache, ACLManager $aclManager, bool $inShare) {
 		parent::__construct($cache);
 		$this->aclManager = $aclManager;
 		$this->inShare = $inShare;
-		$this->fileAclManager = $fileAclManager;
-		$this->folderId = $folderId;
-		$this->user = $user;
-		$this->folderManager = $folderManager;
 	}
 
 	protected function formatCacheEntry($entry, array $rules = []) {
 		if (isset($entry['permissions'])) {
 			$entry['scan_permissions'] = $entry['permissions'];
 			$entry['permissions'] &= $this->getACLPermissionsForPath($entry['path'], $rules);
+			
+			// 如果没有权限，检查是否应该应用隐藏可见功能
 			if (!$entry['permissions']) {
-				return false;
+				// 判断是否为目录（mimetype='httpd/unix-directory'）
+				$isDirectory = isset($entry['mimetype']) && $entry['mimetype'] === 'httpd/unix-directory';
+				
+				if ($isDirectory) {
+					// 检查是否有子项有读/编辑权限
+					$hasChildPermission = $this->aclManager->hasChildWithReadOrEditPermission($entry['path']);
+					if ($hasChildPermission) {
+						// 应用隐藏可见功能：仅赋予读权限
+						$entry['permissions'] = Constants::PERMISSION_READ;
+						// 添加隐藏可见标记
+						$entry['isHiddenVisible'] = true;
+					} else {
+						return false;
+					}
+				} else {
+					// 文件没有权限则直接过滤掉
+					return false;
+				}
 			}
 		}
 		return $entry;
@@ -110,68 +77,7 @@ class ACLCacheWrapper extends CacheWrapper {
 		$entries = array_map(function ($entry) use ($rules) {
 			return $this->formatCacheEntry($entry, $rules);
 		}, $results);
-		$filtered = array_filter(array_filter($entries));
-
-		if ($this->fileAclManager !== null && $this->user !== null && !empty($results)) {
-			$parentPath = $results[0]->getPath();
-			$parentDir = dirname($parentPath);
-			if ($parentDir === '.' || $parentDir === '/') {
-				$parentDir = '';
-			}
-
-			$relativeParentDir = $this->getRelativePath($parentDir);
-			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $relativeParentDir);
-
-			$existingNames = array_map(function ($entry) {
-				return $entry['name'] ?? basename($entry['path'] ?? '');
-			}, $filtered);
-
-			$allResults = $this->getCache()->getFolderContentsById($fileId);
-			$allByName = [];
-			foreach ($allResults as $r) {
-				$allByName[$r['name']] = $r;
-			}
-
-			foreach ($visibleChildren as $child) {
-				if (!in_array($child, $existingNames) && isset($allByName[$child])) {
-					$entry = $this->formatCacheEntry($allByName[$child], $rules);
-					if ($entry) {
-						$filtered[] = $entry;
-					}
-				}
-			}
-		}
-
-		if (!empty($results)) {
-			$parentPath = $results[0]->getPath();
-			$parentDir = dirname($parentPath);
-			if ($parentDir === '.' || $parentDir === '/') {
-				$parentDir = '';
-			}
-
-			$aclVisibleChildren = $this->aclManager->getVisibleChildren(ltrim($parentDir, '/'));
-
-			$existingNames = array_map(function ($entry) {
-				return $entry['name'] ?? basename($entry['path'] ?? '');
-			}, $filtered);
-
-			$allResults = $this->getCache()->getFolderContentsById($fileId);
-			$allByName = [];
-			foreach ($allResults as $r) {
-				$allByName[$r['name']] = $r;
-			}
-
-			foreach ($aclVisibleChildren as $child) {
-				if (!in_array($child, $existingNames) && isset($allByName[$child])) {
-					$entry = $this->formatCacheEntry($allByName[$child], $rules);
-					if ($entry) {
-						$filtered[] = $entry;
-					}
-				}
-			}
-		}
-
-		return $filtered;
+		return array_filter(array_filter($entries));
 	}
 
 	public function search($pattern) {
@@ -192,12 +98,14 @@ class ACLCacheWrapper extends CacheWrapper {
 		return array_map([$this, 'formatCacheEntry'], $results);
 	}
 
+	/**
+	 * @param ICacheEntry[] $entries
+	 * @return Rule[][]
+	 */
 	private function preloadEntries(array $entries): array {
 		$paths = array_map(function (ICacheEntry $entry) {
 			return $entry->getPath();
 		}, $entries);
-		// ACLManager.getACLPermissionsForPath already handles explicit inheritance
-		// by only using rules for the exact path, not parent paths
 		return $this->aclManager->getRelevantRulesForPath($paths, false);
 	}
 }

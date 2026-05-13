@@ -21,6 +21,9 @@ class ACLManager {
 	/** @var callable */
 	private $rootFolderProvider;
 
+	/** @var CappedMemoryCache 缓存子目录权限检查结果 */
+	private CappedMemoryCache $childPermissionCache;
+
 	public function __construct(
 		private RuleManager  $ruleManager,
 		private TrashManager $trashManager,
@@ -32,6 +35,7 @@ class ACLManager {
 		private bool         $inheritMergePerUser = false,
 	) {
 		$this->ruleCache = new CappedMemoryCache();
+		$this->childPermissionCache = new CappedMemoryCache();
 		$this->rootFolderProvider = $rootFolderProvider;
 	}
 
@@ -145,18 +149,7 @@ class ACLManager {
 
 	public function getACLPermissionsForPath(string $path): int {
 		$path = ltrim($path, '/');
-		
-		// For explicit inheritance: only use rules directly on this path, not parent paths
-		// This means permissions are copied at creation time but don't dynamically inherit
-		$rules = $this->getRules([$path]);
-		
-		// If no rules exist for this path:
-		// - For regular users: return 0 (no permissions) - folder should be hidden
-		// - For ACL admins: This is handled by GroupFolderStorage which grants full access
-		//   to users who can manage ACL
-		if (empty($rules[$path])) {
-			return 0;
-		}
+		$rules = $this->getRules($this->getRelevantPaths($path));
 
 		return $this->calculatePermissionsForPath($rules);
 	}
@@ -168,9 +161,7 @@ class ACLManager {
 	 */
 	public function testACLPermissionsForPath(string $path, array $newRules): int {
 		$path = ltrim($path, '/');
-		
-		// For explicit inheritance: only use rules directly on this path
-		$rules = $this->getRules([$path]);
+		$rules = $this->getRules($this->getRelevantPaths($path));
 
 		$rules[$path] = $this->filterApplicableRulesToUser($newRules);
 
@@ -184,15 +175,9 @@ class ACLManager {
 	 */
 	public function getPermissionsForPathFromRules(string $path, array $rules): int {
 		$path = ltrim($path, '/');
-		
-		// For explicit inheritance: only use rules directly on this path
-		// Filter to only include rules for the exact path
-		$pathRules = [];
-		if (isset($rules[$path])) {
-			$pathRules[$path] = $rules[$path];
-		}
-		
-		return $this->calculatePermissionsForPath($pathRules);
+		$relevantPaths = $this->getRelevantPaths($path);
+		$rules = array_intersect_key($rules, array_flip($relevantPaths));
+		return $this->calculatePermissionsForPath($rules);
 	}
 
 	/**
@@ -270,53 +255,72 @@ class ACLManager {
 		}
 	}
 
+	/**
+	 * 检查目录是否有子项具有读或编辑权限
+	 * 用于实现"隐藏的可见"功能：父目录无权限但子项有权限时，父目录可见
+	 * 
+	 * @param string $path 目录路径
+	 * @return bool 是否有子项具有读/编辑权限
+	 */
+	public function hasChildWithReadOrEditPermission(string $path): bool {
+		$path = ltrim($path, '/');
+		
+		// 检查缓存
+		if ($this->childPermissionCache->hasKey($path)) {
+			return $this->childPermissionCache->get($path);
+		}
+		
+		// 获取所有子路径的规则
+		$rules = $this->ruleManager->getRulesForPrefix($this->user, $this->getRootStorageId(), $path);
+		
+		$hasChildPermission = false;
+		
+		foreach ($rules as $childPath => $childRules) {
+			// 排除当前目录本身
+			if ($childPath === $path) {
+				continue;
+			}
+			
+			// 检查子项是否有读或编辑权限
+			$childPermissions = $this->getACLPermissionsForPath($childPath);
+			$hasRead = ($childPermissions & Constants::PERMISSION_READ) !== 0;
+			$hasEdit = ($childPermissions & (Constants::PERMISSION_UPDATE | Constants::PERMISSION_CREATE | Constants::PERMISSION_DELETE)) !== 0;
+			
+			if ($hasRead || $hasEdit) {
+				$hasChildPermission = true;
+				break;
+			}
+		}
+		
+		// 缓存结果
+		$this->childPermissionCache->set($path, $hasChildPermission);
+		
+		return $hasChildPermission;
+	}
+
+	/**
+	 * 检查路径是否为"仅回显"目录（本身无权限但因子项有权限而显示）
+	 * 
+	 * @param string $path 目录路径
+	 * @return bool
+	 */
+	public function isEchoOnlyDirectory(string $path): bool {
+		$path = ltrim($path, '/');
+		
+		// 获取原始权限
+		$originalPermissions = $this->getACLPermissionsForPath($path);
+		
+		// 如果原始权限已经有读权限，则不是仅回显
+		if ($originalPermissions & Constants::PERMISSION_READ) {
+			return false;
+		}
+		
+		// 检查是否有子项有权限（如果有，则该目录是仅回显）
+		return $this->hasChildWithReadOrEditPermission($path);
+	}
+
 	public function preloadRulesForFolder(string $path): void {
 		$this->ruleManager->getRulesForFilesByParent($this->user, $this->getRootStorageId(), $path);
-	}
-
-	public function hasReadPermissionInSubtree(string $path): bool {
-		$path = ltrim($path, '/');
-		$rules = $this->ruleManager->getRulesForPrefix($this->user, $this->getRootStorageId(), $path);
-
-		foreach ($rules as $rulePath => $rulesForPath) {
-			$permissions = $this->getACLPermissionsForPath($rulePath);
-			if ($permissions & Constants::PERMISSION_READ) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	public function getVisibleChildren(string $parentPath): array {
-		$parentPath = ltrim($parentPath, '/');
-		$rules = $this->ruleManager->getRulesForPrefix($this->user, $this->getRootStorageId(), $parentPath);
-
-		$children = [];
-		$prefix = $parentPath === '' ? '' : $parentPath . '/';
-		$prefixLen = strlen($prefix);
-
-		foreach ($rules as $rulePath => $rulesForPath) {
-			$permissions = $this->getACLPermissionsForPath($rulePath);
-			if (!($permissions & Constants::PERMISSION_READ)) {
-				continue;
-			}
-
-			if ($prefix === '') {
-				$remaining = $rulePath;
-			} elseif (str_starts_with($rulePath, $prefix)) {
-				$remaining = substr($rulePath, $prefixLen);
-			} else {
-				continue;
-			}
-
-			$parts = explode('/', $remaining);
-			if (!empty($parts[0])) {
-				$children[$parts[0]] = true;
-			}
-		}
-
-		return array_keys($children);
 	}
 
 	/**

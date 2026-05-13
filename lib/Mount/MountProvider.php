@@ -11,7 +11,6 @@ use OC\Files\Storage\Wrapper\PermissionsMask;
 use OCA\GroupFolders\ACL\ACLManager;
 use OCA\GroupFolders\ACL\ACLManagerFactory;
 use OCA\GroupFolders\ACL\ACLStorageWrapper;
-use OCA\GroupFolders\FileAcl\FileAclManager;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCP\Constants;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -62,7 +61,6 @@ class MountProvider implements IMountProvider {
 	private ?int $rootStorageId = null;
 	private bool $allowRootShare;
 	private bool $enableEncryption;
-	private FileAclManager $fileAclManager;
 
 	public function __construct(
 		IGroupManager $groupProvider,
@@ -76,8 +74,7 @@ class MountProvider implements IMountProvider {
 		IDBConnection $connection,
 		ICache $cache,
 		bool $allowRootShare,
-		bool $enableEncryption,
-		FileAclManager $fileAclManager,
+		bool $enableEncryption
 	) {
 		$this->groupProvider = $groupProvider;
 		$this->folderManager = $folderManager;
@@ -91,7 +88,6 @@ class MountProvider implements IMountProvider {
 		$this->cache = $cache;
 		$this->allowRootShare = $allowRootShare;
 		$this->enableEncryption = $enableEncryption;
-		$this->fileAclManager = $fileAclManager;
 	}
 
 	private function getRootStorageId(): int {
@@ -220,17 +216,7 @@ class MountProvider implements IMountProvider {
 				'storage' => $storage,
 				'acl_manager' => $aclManager,
 				'in_share' => $inShare,
-				'file_acl_manager' => $this->fileAclManager,
-				'folder_id' => $id,
-				'user' => $user,
-				'folder_manager' => $this->folderManager,
 			]);
-			if ($aclRootPermissions === 0) {
-				if ($this->fileAclManager->isPathDirectoryVisible($user, $id, '')
-					|| $aclManager->hasReadPermissionInSubtree($rootPath)) {
-					$aclRootPermissions = Constants::PERMISSION_READ;
-				}
-			}
 			$cacheEntry['permissions'] &= $aclRootPermissions;
 		}
 

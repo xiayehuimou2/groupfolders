@@ -34,6 +34,7 @@ class ACLPlugin extends ServerPlugin {
 	public const ACL_LIST = '{http://nextcloud.org/ns}acl-list';
 	public const INHERITED_ACL_LIST = '{http://nextcloud.org/ns}inherited-acl-list';
 	public const GROUP_FOLDER_ID = '{http://nextcloud.org/ns}group-folder-id';
+	public const IS_HIDDEN_VISIBLE = '{http://nextcloud.org/ns}is-hidden-visible';
 
 	private ?Server $server = null;
 	private ?IUser $user = null;
@@ -162,6 +163,27 @@ class ACLPlugin extends ServerPlugin {
 		$propFind->handle(self::ACL_CAN_MANAGE, function () use ($fileInfo) {
 			return $this->isAdmin($fileInfo->getPath());
 		});
+
+		// 添加隐藏可见属性
+		$propFind->handle(self::IS_HIDDEN_VISIBLE, function () use ($fileInfo, $mount) {
+			$path = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
+			$permissions = $fileInfo->getPermissions();
+			
+			// 如果文件本身没有权限，但通过 ACLStorageWrapper 的隐藏可见功能获得了仅读权限
+			// 则标记为隐藏可见
+			$hasBasicRead = ($permissions & Constants::PERMISSION_READ) !== 0;
+			$hasOtherPerms = ($permissions & (Constants::PERMISSION_UPDATE | Constants::PERMISSION_CREATE | Constants::PERMISSION_DELETE | Constants::PERMISSION_SHARE)) !== 0;
+			
+			if ($hasBasicRead && !$hasOtherPerms) {
+				// 检查是否为目录
+				if ($fileInfo->getType() === \OCP\Files\FileInfo::TYPE_FOLDER) {
+					$aclManager = $this->aclManagerFactory->getACLManager($this->user);
+					return $aclManager->isEchoOnlyDirectory($path);
+				}
+			}
+			
+			return false;
+		});
 	}
 
 	public function propPatch(string $path, PropPatch $propPatch): void {
@@ -242,10 +264,14 @@ class ACLPlugin extends ServerPlugin {
 			});
 			foreach ($deletedRules as $deletedRule) {
 				$this->ruleManager->deleteRule($deletedRule);
+				// Propagate deletion to all children recursively
+				$this->ruleManager->propagateAclChangeToChildren($deletedRule, $mount->getNumericStorageId(), $path, true);
 			}
 
 			foreach ($rules as $rule) {
 				$this->ruleManager->saveRule($rule);
+				// Propagate add/update to all children recursively
+				$this->ruleManager->propagateAclChangeToChildren($rule, $mount->getNumericStorageId(), $path, false);
 			}
 
 

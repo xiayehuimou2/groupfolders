@@ -47,11 +47,8 @@
 			<tr>
 				<th />
 				<th>{{ t('groupfolders', 'Group folder') }}</th>
-				<th v-tooltip="t('groupfolders', 'Read')" class="state-column">
-					{{ t('groupfolders', 'Read') }}
-				</th>
-				<th v-tooltip="t('groupfolders', 'Edit')" class="state-column">
-					{{ t('groupfolders', 'Edit') }}
+				<th class="permissions-column">
+					{{ t('groupfolders', 'Permissions') }}
 				</th>
 				<th class="state-column" />
 			</tr>
@@ -64,16 +61,12 @@
 				<td class="username">
 					{{ t('groupfolders', 'You') }}
 				</td>
-				<td class="state-column">
-					<AclStateButton :state="getState(OC.PERMISSION_READ, {
-							permissions: model.permissions,
-							mask: 31,
-						})"
-						:read-only="true" />
-				</td>
-				<td class="state-column">
-					<AclStateButton :state="getEditState({ permissions: model.permissions, mask: 31 })"
-						:read-only="true" />
+				<td class="permissions-column">
+					<NcSelect
+						:options="[{label: t('groupfolders', 'Read'), value: 'read'}, {label: t('groupfolders', 'Edit'), value: 'edit'}]"
+						:value="getUserPermissionOption({ permissions: model.permissions, mask: 31 })"
+						:disabled="true"
+						:placeholder="t('groupfolders', 'No permission')" />
 				</td>
 			</tr>
 			</tbody>
@@ -85,20 +78,23 @@
 				<td v-tooltip="getFullDisplayName(item.mappingDisplayName, item.mappingType)" class="username">
 					{{ getFullDisplayName(item.mappingDisplayName, item.mappingType) }}
 				</td>
-				<td class="state-column">
-					<AclStateButton :state="getState(OC.PERMISSION_READ, item)"
-						:inherited="item.inherited"
+				<td class="permissions-column">
+					<span v-if="editingItemId !== item.mappingId"
+						class="permission-text"
+						@click="startEditing(item)">
+						{{ getPermissionLabel(item) }}
+					</span>
+					<NcSelect v-else
+						ref="permissionSelect"
+						:options="permissionOptions"
+						:value="getPermissionOption(item)"
 						:disabled="loading"
-						@update="changePermission(item, OC.PERMISSION_READ, $event)" />
+						:placeholder="t('groupfolders', 'No permission')"
+						@input="changePermission(item, $event)"
+						@close="stopEditing" />
 				</td>
 				<td class="state-column">
-					<AclStateButton :state="getEditState(item)"
-						:inherited="item.inherited"
-						:disabled="loading"
-						@update="changeEditPermission(item, $event)" />
-				</td>
-				<td class="state-column">
-					<NcButton v-if="item.inherited === false"
+					<NcButton
 						type="tertiary"
 						:v-tooltip="t('groupfolders', 'Remove access rule')"
 						:aria-label="t('groupfolders', 'Remove access rule')"
@@ -166,6 +162,11 @@ export default {
 			value: null,
 			model: null,
 			list: [],
+			editingItemId: null,
+			permissionOptions: [
+				{ label: t('groupfolders', 'Read'), value: 'read' },
+				{ label: t('groupfolders', 'Edit'), value: 'edit' }
+			]
 		}
 	},
 	computed: {
@@ -228,6 +229,49 @@ export default {
 				}
 				
 				return STATES.INHERIT_DENY;
+			}
+		},
+		getUserPermissionOption() {
+			return (item) => {
+				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
+				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
+				const hasEdit = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+				
+				if (hasEdit && hasRead) {
+					return { label: t('groupfolders', 'Edit'), value: 'edit' };
+				} else if (hasRead) {
+					return { label: t('groupfolders', 'Read'), value: 'read' };
+				}
+				return null;
+			}
+		},
+		getPermissionLabel() {
+			return (item) => {
+				if (!item) return t('groupfolders', 'No permission');
+				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
+				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
+				const hasEdit = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+				
+				if (hasEdit && hasRead) {
+					return t('groupfolders', 'Edit');
+				} else if (hasRead) {
+					return t('groupfolders', 'Read');
+				}
+				return t('groupfolders', 'No permission');
+			}
+		},
+		getPermissionOption() {
+			return (item) => {
+				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
+				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
+				const hasEdit = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+				
+				if (hasEdit && hasRead) {
+					return { label: t('groupfolders', 'Edit'), value: 'edit' };
+				} else if (hasRead) {
+					return { label: t('groupfolders', 'Read'), value: 'read' };
+				}
+				return null;
 			}
 		},
 	},
@@ -326,7 +370,8 @@ export default {
 		createAcl(option) {
 			this.value = null
 			const rule = new Rule()
-			rule.fromValues(option.type, option.id, option.displayname, 0b00000, 0b11111)
+			// Default to read permission when creating new ACL
+			rule.fromValues(option.type, option.id, option.displayname, 0b11111, OC.PERMISSION_READ)
 			this.list.push(rule)
 			client.propPatch(this.model, this.list.filter(rule => !rule.inherited)).then(() => {
 				this.showAclCreate = false
@@ -334,47 +379,75 @@ export default {
 		},
 		removeAcl(rule) {
 			const index = this.list.indexOf(rule)
-			const list = this.list.concat([]) // shallow clone
+			
 			if (index > -1) {
-				list.splice(index, 1)
-			}
-			client.propPatch(this.model, list.filter(rule => !rule.inherited)).then(() => {
-				// For explicit inheritance: just remove the rule, don't restore inherited ACL
-				// The permission should truly disappear, not be restored from parent
-				this.list.splice(index, 1)
-				// DO NOT insert inherited ACL - we want explicit inheritance only
-				// const inheritedAcl = this.inheritedAclsById[rule.getUniqueMappingIdentifier()]
-				// if (inheritedAcl != null) {
-				// 	this.list.splice(index, 0, inheritedAcl)
-				// }
-			})
-
-		},
-		async changePermission(item, permission, $event) {
-			const index = this.list.indexOf(item)
-			const inherit = $event === STATES.INHERIT_ALLOW || $event === STATES.INHERIT_DENY || $event === STATES.INHERIT_DEFAULT
-			const allow = $event === STATES.SELF_ALLOW
-			const bit = BinaryTools.firstHigh(permission)
-			const itemRestorePoint = item.clone()
-			item = item.clone()
-			if (inherit) {
-				item.mask = BinaryTools.clear(item.mask, bit)
-				// we can ignore permissions, since they are inherited
-			} else {
-				item.mask = BinaryTools.set(item.mask, bit)
-				if (allow) {
-					item.permissions = BinaryTools.set(item.permissions, bit)
+				// If the rule is inherited, we need to create an explicit rule to override it
+				if (rule.inherited) {
+					// Create a new rule that explicitly denies all permissions
+					// mask=31 (0b11111) means all 5 permission bits are set
+					// permissions=0 means all permissions are denied
+					const newRule = rule.clone()
+					newRule.inherited = false
+					newRule.mask = 31 // All permission bits
+					newRule.permissions = 0 // Deny all
+					Vue.set(this.list, index, newRule)
+					
+					// Save the new rule
+					client.propPatch(this.model, [newRule]).then(() => {
+						this.loadAcls() // Reload to reflect the changes
+					})
 				} else {
-					item.permissions = BinaryTools.clear(item.permissions, bit)
+					// For non-inherited rules, simply remove them
+					const list = this.list.concat([]) // shallow clone
+					list.splice(index, 1)
+					client.propPatch(this.model, list.filter(rule => !rule.inherited)).then(() => {
+						this.list.splice(index, 1)
+						// Removed the logic that restores inherited ACLs when deleting a rule
+						// This ensures that when an ACL is deleted, it's completely removed rather than reverting to inherited permissions
+					})
 				}
 			}
+		},
+		startEditing(item) {
+			this.editingItemId = item.mappingId
+			Vue.nextTick(() => {
+				const select = this.$refs.permissionSelect
+				if (select) {
+					select.$el.querySelector('input').focus()
+				}
+			})
+		},
+		stopEditing() {
+			this.editingItemId = null
+		},
+		async changePermission(item, option) {
+			if (!option || !option.value) {
+				// 如果未选择有效权限，恢复原样
+				this.stopEditing()
+				return
+			}
+			
+			const index = this.list.indexOf(item)
+			const itemRestorePoint = item.clone()
+			item = item.clone()
+			
+			if (option.value === 'read') {
+				// Read only: allow READ, deny EDIT permissions
+				item.mask = 0b11111
+				item.permissions = OC.PERMISSION_READ
+			} else if (option.value === 'edit') {
+				// Edit: allow READ + all EDIT permissions
+				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE
+				item.mask = 0b11111
+				item.permissions = OC.PERMISSION_READ | EDIT_PERMS
+			}
+			
 			item.inherited = false
 			Vue.set(this.list, index, item)
 			this.loading = true
 			try {
 				await client.propPatch(this.model, this.list.filter(rule => !rule.inherited))
 				logger.debug('Permissions updated successfully')
-				// Reload ACLs to ensure UI reflects the latest permissions
 				await this.loadAcls()
 			} catch (error) {
 				logger.error('Failed to save changes:', { error })
@@ -382,45 +455,10 @@ export default {
 				showError(error)
 			} finally {
 				this.loading = false
+				this.stopEditing()
 			}
 		},
-		async changeEditPermission(item, $event) {
-			const index = this.list.indexOf(item)
-			const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
-			const itemRestorePoint = item.clone()
-			item = item.clone()
-			
-			if ($event === STATES.SELF_ALLOW) {
-				// Set all edit permission bits in mask and enable them
-				item.mask |= EDIT_PERMS
-				item.permissions |= EDIT_PERMS
-				item.inherited = false
-			} else if ($event === STATES.SELF_DENY) {
-				// Set all edit permission bits in mask and disable them
-				item.mask |= EDIT_PERMS
-				item.permissions &= ~EDIT_PERMS
-				item.inherited = false
-			} else {
-				// Inherit permissions: clear all edit permission bits from mask
-				item.mask &= ~EDIT_PERMS
-				item.inherited = false
-			}
-			
-			Vue.set(this.list, index, item)
-			this.loading = true
-			try {
-				await client.propPatch(this.model, this.list.filter(rule => !rule.inherited))
-				logger.debug('Edit permissions updated successfully')
-				// Reload ACLs to ensure UI reflects the latest permissions
-				await this.loadAcls()
-			} catch (error) {
-				logger.error('Failed to save changes:', { error })
-				Vue.set(this.list, index, itemRestorePoint)
-				showError(error)
-			} finally {
-				this.loading = false
-			}
-		},
+
 	},
 }
 </script>
@@ -483,6 +521,26 @@ export default {
 		overflow: hidden;
 		max-width: 0;
 		min-width: 50px;
+	}
+
+	.permissions-column {
+		width: 200px !important;
+		padding: 3px;
+		cursor: pointer;
+	}
+
+	.permission-text {
+		display: block;
+		padding: 6px 10px;
+		border-radius: var(--border-radius-large);
+	}
+
+	.permission-text:hover {
+		background-color: var(--color-background-hover);
+	}
+
+	.permissions-column .multiselect {
+		width: 100%;
 	}
 
 	.state-column {

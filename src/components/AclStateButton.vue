@@ -24,7 +24,7 @@
 	<div v-else>
 		<NcActions :aria-label="label" :v-tooltip="label">
 			<template #icon>
-				<component :is="icon" :class="{inherited: isInherited}" :size="16" />
+				<component :is="icon" :size="16" />
 			</template>
 			<NcActionRadio name="state"
 				:checked="state === STATES.INHERIT_ALLOW || state === STATES.INHERIT_DENY || state === STATES.INHERIT_DEFAULT"
@@ -138,8 +138,5 @@ export default {
 </script>
 
 <style scoped>
-	.inherited {
-		opacity: 0.5;
-		color: var(--color-text-maxcontrast);
-	}
+
 </style>

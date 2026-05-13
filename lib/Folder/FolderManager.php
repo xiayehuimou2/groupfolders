@@ -952,13 +952,33 @@ class FolderManager {
 		foreach ($folders as $folder) {
 			$id = $folder['folder_id'];
 			if (isset($mergedFolders[$id])) {
-				$mergedFolders[$id]['permissions'] |= $folder['permissions'];
+				// Merge permissions but exclude SHARE permission (bit 4 = 16)
+				$mergedFolders[$id]['permissions'] |= ($folder['permissions'] & ~\OCP\Constants::PERMISSION_SHARE);
 			} else {
+				// Also exclude SHARE permission from initial folder permissions
+				$folder['permissions'] = $folder['permissions'] & ~\OCP\Constants::PERMISSION_SHARE;
 				$mergedFolders[$id] = $folder;
 			}
 		}
 
-		return array_values($mergedFolders);
+		$folders = array_values($mergedFolders);
+
+		// Filter folders based on ACL rules for non-admin users
+		$isAdmin = $this->groupManager->isAdmin($user->getUID());
+		if (!$isAdmin && $rootStorageId > 0) {
+			$folders = array_filter($folders, function (array $folder) use ($user, $rootStorageId): bool {
+				// If ACL is not enabled, show the folder
+				if (!$folder['acl']) {
+					return true;
+				}
+
+				// If ACL is enabled, check if there are ACL rules on the root directory
+				// Only show the folder if there are ACL rules on the root
+				return $this->hasRootAclRules($folder['folder_id'], $user, $rootStorageId);
+			});
+		}
+
+		return $folders;
 	}
 
 	/**
@@ -977,7 +997,8 @@ class FolderManager {
 		$permissions = 0;
 		foreach ($folders as $folder) {
 			if ($folderId === $folder['folder_id']) {
-				$permissions |= $folder['permissions'];
+				// Merge permissions but exclude SHARE permission (bit 4 = 16)
+				$permissions |= ($folder['permissions'] & ~\OCP\Constants::PERMISSION_SHARE);
 			}
 		}
 
@@ -1040,5 +1061,49 @@ class FolderManager {
 		}
 
 		return $quota;
+	}
+
+	/**
+	 * Check if a folder has ACL rules on its root directory for the given user
+	 *
+	 * @param int $folderId The folder ID
+	 * @param IUser $user The user to check for
+	 * @param int $rootStorageId The root storage ID
+	 * @return bool True if there are ACL rules on the root directory
+	 * @throws Exception
+	 */
+	private function hasRootAclRules(int $folderId, IUser $user, int $rootStorageId): bool {
+		// Get the root_id for this folder
+		$query = $this->connection->getQueryBuilder();
+		$query->select('root_id')
+			->from('group_folders')
+			->where($query->expr()->eq('folder_id', $query->createNamedParameter($folderId, IQueryBuilder::PARAM_INT)));
+		
+		$row = $query->executeQuery()->fetch();
+		if (!$row || !isset($row['root_id'])) {
+			return false;
+		}
+
+		$rootId = (int)$row['root_id'];
+
+		// Check if there are any ACL rules for this root_id in group_folders_acl table
+		$userMappings = $this->userMappingManager->getMappingsForUser($user);
+		if (empty($userMappings)) {
+			return false;
+		}
+
+		$query = $this->connection->getQueryBuilder();
+		$query->select('fileid')
+			->from('group_folders_acl')
+			->where($query->expr()->eq('fileid', $query->createNamedParameter($rootId, IQueryBuilder::PARAM_INT)))
+			->andWhere($query->expr()->orX(...array_map(function ($userMapping) use ($query) {
+				return $query->expr()->andX(
+					$query->expr()->eq('mapping_type', $query->createNamedParameter($userMapping->getType())),
+					$query->expr()->eq('mapping_id', $query->createNamedParameter($userMapping->getId()))
+				);
+			}, $userMappings)));
+
+		$count = $query->executeQuery()->rowCount();
+		return $count > 0;
 	}
 }

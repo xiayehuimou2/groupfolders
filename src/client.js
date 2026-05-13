@@ -161,15 +161,13 @@ function patchFilesClient(client) {
 		data.acl = parseAclList(acls)
 		data.inheritedAcls = parseAclList(inheritedAcls)
 
-		// For explicit inheritance: DO NOT merge inherited ACL permissions
-		// The ACL should only use its own explicit permissions, not inherit from parent
-		// data.acl.map((acl) => {
-		// 	const inheritedAcl = data.inheritedAcls.find((inheritedAclRule) => inheritedAclRule.mappingType === acl.mappingType && inheritedAclRule.mappingId === acl.mappingId)
-		// 	if (inheritedAcl) {
-		// 		acl.permissions = (acl.permissions & acl.mask) | (inheritedAcl.permissions & ~acl.mask)
-		// 	}
-		// 	return acl
-		// })
+		data.acl.map((acl) => {
+			const inheritedAcl = data.inheritedAcls.find((inheritedAclRule) => inheritedAclRule.mappingType === acl.mappingType && inheritedAclRule.mappingId === acl.mappingId)
+			if (inheritedAcl) {
+				acl.permissions = (acl.permissions & acl.mask) | (inheritedAcl.permissions & ~acl.mask)
+			}
+			return acl
+		})
 		return data
 	})
 
@@ -200,8 +198,6 @@ class AclDavService {
 					)
 					aclsById[acl.getUniqueMappingIdentifier()] = acl
 				}
-				// For explicit inheritance: DO NOT automatically add inherited ACLs to the list
-				// Only track them in inheritedAclsById for reference, but don't display them
 				for (const i in fileInfo.inheritedAcls) {
 					const acl = new Rule()
 					acl.fromValues(
@@ -214,19 +210,68 @@ class AclDavService {
 					)
 					const id = acl.getUniqueMappingIdentifier()
 					inheritedAclsById[id] = acl
-					// DO NOT add inherited ACL to aclsById - we want explicit inheritance only
-					// if (aclsById[id] == null) {
-					// 	aclsById[id] = acl
-					// 	aclsById[id].inheritedMask = acl.mask
-					// 	aclsById[id].inheritedPermissions = acl.permissions
-					// 	aclsById[id].mask = 0
-					// } else {
-					// 	aclsById[id].inheritedMask = acl.mask
-					// 	aclsById[id].inheritedPermissions = acl.permissions
-					// }
+					if (aclsById[id] == null) {
+						aclsById[id] = acl
+
+						aclsById[id].inheritedMask = acl.mask
+						aclsById[id].inheritedPermissions = acl.permissions
+						aclsById[id].mask = 0
+					} else {
+						aclsById[id].inheritedMask = acl.mask
+						aclsById[id].inheritedPermissions = acl.permissions
+					}
 				}
+
+				// CRITICAL: Filter out ACL entries with permissions=0 (explicit deny due to inheritance removal)
+				// These MUST NOT be displayed in the UI as they represent "no permission" state
+				// When user modifies permissions later, the existing record will be updated instead of creating new one
+				
+				// Debug: log all ACLs before filtering
+				logger.debug('=== ACL FILTERING DEBUG ===');
+				logger.debug('Total aclsById count:', Object.keys(aclsById).length);
+				Object.values(aclsById).forEach((acl, idx) => {
+					logger.debug(`ACL[${idx}]:`, {
+						mappingType: acl.mappingType,
+						mappingId: acl.mappingId,
+						mappingDisplayName: acl.mappingDisplayName,
+						permissions: acl.permissions,
+						mask: acl.mask,
+						inherited: acl.inherited,
+						permissionsType: typeof acl.permissions
+					});
+				});
+
+				const filteredAcls = Object.values(aclsById).filter(acl => {
+					// ALWAYS filter out rules with permissions=0 (no permissions at all)
+					// This includes both inherited rules with no permissions and explicit deny rules
+					// IMPORTANT: Check both === 0 and == 0 to handle string/number type issues
+					if (acl.permissions === 0 || acl.permissions == 0) {
+						logger.warn('⚠️ FILTERING OUT ACL with permissions=0:', { 
+							mappingType: acl.mappingType, 
+							mappingId: acl.mappingId,
+							mappingDisplayName: acl.mappingDisplayName,
+							mask: acl.mask,
+							inherited: acl.inherited,
+							reason: 'permissions is 0 - represents deny-all rule'
+						});
+						return false;
+					}
+					logger.debug('✓ Keeping ACL:', { 
+						mappingType: acl.mappingType, 
+						mappingId: acl.mappingId,
+						permissions: acl.permissions,
+						mask: acl.mask
+					});
+					return true;
+				});
+				
+				logger.debug('=== FILTERING RESULT ===');
+				logger.debug('Before filtering:', Object.keys(aclsById).length, 'ACLs');
+				logger.debug('After filtering:', filteredAcls.length, 'ACLs');
+				logger.debug('Filtered out:', Object.keys(aclsById).length - filteredAcls.length, 'ACLs');
+
 				return {
-					acls: Object.values(aclsById),
+					acls: filteredAcls,
 					inheritedAclsById,
 					aclEnabled: fileInfo.aclEnabled,
 					aclCanManage: fileInfo.aclCanManage,

@@ -10,96 +10,92 @@ namespace OCA\GroupFolders\ACL;
 
 use Icewind\Streams\IteratorDirectory;
 use OC\Files\Storage\Wrapper\Wrapper;
-use OCA\GroupFolders\FileAcl\FileAclManager;
-use OCA\GroupFolders\Folder\FolderManager;
 use OCP\Constants;
-use OCP\IUser;
 
 class ACLStorageWrapper extends Wrapper {
 	/** @var ACLManager */
 	private $aclManager;
 	/** @var bool */
 	private $inShare;
-	private ?FileAclManager $fileAclManager;
-	private int $folderId;
-	private ?IUser $user;
-	private ?FolderManager $folderManager;
+	/** @var bool 是否启用隐藏可见功能 */
+	private $enableHiddenVisibility = true;
 
 	public function __construct($arguments) {
 		parent::__construct($arguments);
 		$this->aclManager = $arguments['acl_manager'];
 		$this->inShare = $arguments['in_share'];
-		$this->fileAclManager = $arguments['file_acl_manager'] ?? null;
-		$this->folderId = $arguments['folder_id'] ?? 0;
-		$this->user = $arguments['user'] ?? null;
-		$this->folderManager = $arguments['folder_manager'] ?? null;
-	}
-
-	private function getRelativePath(string $path): string {
-		$path = ltrim($path, '/');
-		$rootPrefix = '__groupfolders/' . $this->folderId;
-		if ($path === $rootPrefix) {
-			return '';
-		}
-		$rootPrefixSlash = $rootPrefix . '/';
-		if (str_starts_with($path, $rootPrefixSlash)) {
-			return substr($path, strlen($rootPrefixSlash));
-		}
-		return $path;
 	}
 
 	private function getACLPermissionsForPath(string $path) {
-		// For ACL admins: always return full permissions
-		// Check admin status dynamically to ensure it's always up-to-date
-		if ($this->folderManager !== null && $this->user !== null) {
-			if ($this->folderManager->canManageACL($this->folderId, $this->user)) {
-				return Constants::PERMISSION_ALL;
-			}
-		}
-		
 		$permissions = $this->aclManager->getACLPermissionsForPath($path);
 
+		// if there is no read permissions, than deny everything
 		if ($this->inShare) {
 			$canRead = $permissions & (Constants::PERMISSION_READ + Constants::PERMISSION_SHARE);
 		} else {
 			$canRead = $permissions & Constants::PERMISSION_READ;
 		}
-
-		if ($canRead) {
-			return $permissions;
-		}
-
-		if ($this->fileAclManager !== null && $this->user !== null) {
-			$fileAclPermissions = $this->getFileAclPermissionsForPath($path);
-			if ($fileAclPermissions > 0) {
-				return $fileAclPermissions;
+		
+		// 如果没有读权限，检查是否有子项有读/编辑权限（隐藏可见功能）
+		if (!$canRead && $this->enableHiddenVisibility) {
+			// 仅对目录应用隐藏可见功能
+			if (parent::is_dir($path)) {
+				$hasChildPermission = $this->aclManager->hasChildWithReadOrEditPermission($path);
+				if ($hasChildPermission) {
+					// 返回0权限：可见但不可操作
+					// 注意：返回0会让目录不可读，所以我们需要特殊处理
+					// 通过在metadata中标记isHiddenVisible，让前端知道这是仅回显目录
+					// 这里返回PERMISSION_READ只是为了让目录可见
+					return Constants::PERMISSION_READ;
+				}
 			}
 		}
-
-		if ($this->aclManager->hasReadPermissionInSubtree(ltrim($path, '/'))) {
-			return Constants::PERMISSION_READ;
-		}
-
-		return 0;
+		
+		return $canRead ? $permissions : 0;
 	}
 
-	private function getFileAclPermissionsForPath(string $path): int {
-		if ($this->fileAclManager === null || $this->user === null) {
-			return 0;
+	/**
+	 * 检查目录是否为隐藏可见状态（本身无权限但因子项有权限而可见）
+	 *
+	 * @param string $path 目录路径
+	 * @return bool
+	 */
+	private function isHiddenVisibleDirectory(string $path): bool {
+		// 仅对目录进行检查
+		if (!parent::is_dir($path)) {
+			return false;
 		}
-
-		$relativePath = $this->getRelativePath($path);
-
-		$directPermissions = $this->fileAclManager->getEffectivePermissionsForPath($this->user, $this->folderId, $relativePath);
-		if ($directPermissions & Constants::PERMISSION_READ) {
-			return $directPermissions;
+		
+		// 获取该目录的原始权限（不考虑隐藏可见功能）
+		$originalPermissions = $this->aclManager->getACLPermissionsForPath($path);
+		
+		if ($this->inShare) {
+			$canRead = $originalPermissions & (Constants::PERMISSION_READ + Constants::PERMISSION_SHARE);
+		} else {
+			$canRead = $originalPermissions & Constants::PERMISSION_READ;
 		}
-
-		if ($this->fileAclManager->isPathDirectoryVisible($this->user, $this->folderId, $relativePath)) {
-			return Constants::PERMISSION_READ;
+		
+		// 如果原始权限有读权限，则不是隐藏可见
+		if ($canRead) {
+			return false;
 		}
-
-		return 0;
+		
+		// 检查是否有子项有权限（如果是，则该目录是隐藏可见）
+		if ($this->enableHiddenVisibility) {
+			return $this->aclManager->hasChildWithReadOrEditPermission($path);
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * 获取路径的原始ACL权限（不考虑隐藏可见功能）
+	 *
+	 * @param string $path
+	 * @return int
+	 */
+	private function getOriginalACLPermissionsForPath(string $path): int {
+		return $this->aclManager->getACLPermissionsForPath($path);
 	}
 
 	private function checkPermissions(string $path, int $permissions) {
@@ -135,6 +131,7 @@ class ACLStorageWrapper extends Wrapper {
 	public function rename($source, $target) {
 		if (strpos($source, $target) === 0) {
 			$part = substr($source, strlen($target));
+			//This is a rename of the transfer file to the original file
 			if (strpos($part, '.ocTransferId') === 0) {
 				return $this->checkPermissions($target, Constants::PERMISSION_CREATE) && parent::rename($source, $target);
 			}
@@ -156,8 +153,7 @@ class ACLStorageWrapper extends Wrapper {
 	}
 
 	public function opendir($path) {
-		$canRead = $this->checkPermissions($path, Constants::PERMISSION_READ);
-		if (!$canRead) {
+		if (!$this->checkPermissions($path, Constants::PERMISSION_READ)) {
 			return false;
 		}
 
@@ -168,23 +164,6 @@ class ACLStorageWrapper extends Wrapper {
 				if ($this->checkPermissions(trim($path . '/' . $file, '/'), Constants::PERMISSION_READ)) {
 					$items[] = $file;
 				}
-			}
-		}
-
-		if ($this->fileAclManager !== null && $this->user !== null) {
-			$relativePath = $this->getRelativePath($path);
-			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $relativePath);
-			foreach ($visibleChildren as $child) {
-				if (!in_array($child, $items) && parent::file_exists($path ? $path . '/' . $child : $child)) {
-					$items[] = $child;
-				}
-			}
-		}
-
-		$aclVisibleChildren = $this->aclManager->getVisibleChildren(ltrim($path, '/'));
-		foreach ($aclVisibleChildren as $child) {
-			if (!in_array($child, $items) && parent::file_exists($path ? $path . '/' . $child : $child)) {
-				$items[] = $child;
 			}
 		}
 
@@ -219,13 +198,14 @@ class ACLStorageWrapper extends Wrapper {
 			&& parent::unlink($path);
 	}
 
+	/**
+	 * When deleting we need to ensure that there is no file inside the folder being deleted that misses delete permissions
+	 * This check is fairly expensive so we only do it for the actual delete and not metadata operations
+	 *
+	 * @param string $path
+	 * @return int
+	 */
 	private function canDeleteTree(string $path): int {
-		// For ACL admins: always allow deletion
-		if ($this->folderManager !== null && $this->user !== null) {
-			if ($this->folderManager->canManageACL($this->folderId, $this->user)) {
-				return Constants::PERMISSION_DELETE;
-			}
-		}
 		return $this->aclManager->getPermissionsForTree($path) & Constants::PERMISSION_DELETE;
 	}
 
@@ -248,12 +228,19 @@ class ACLStorageWrapper extends Wrapper {
 		return $this->checkPermissions($path, $permissions) ? parent::writeStream($path, $stream, $size) : 0;
 	}
 
+	/**
+	 * get a cache instance for the storage
+	 *
+	 * @param string $path
+	 * @param \OC\Files\Storage\Storage (optional) the storage to pass to the cache
+	 * @return \OCP\Files\Cache\ICache
+	 */
 	public function getCache($path = '', $storage = null) {
 		if (!$storage) {
 			$storage = $this;
 		}
 		$sourceCache = parent::getCache($path, $storage);
-		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare, $this->fileAclManager, $this->folderId, $this->user, $this->folderManager);
+		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare);
 	}
 
 	public function getMetaData($path) {
@@ -262,6 +249,11 @@ class ACLStorageWrapper extends Wrapper {
 		if ($data && isset($data['permissions'])) {
 			$data['scan_permissions'] = isset($data['scan_permissions']) ? $data['scan_permissions'] : $data['permissions'];
 			$data['permissions'] &= $this->getACLPermissionsForPath($path);
+			
+			// 添加隐藏可见标记
+			if ($this->isHiddenVisibleDirectory($path)) {
+				$data['isHiddenVisible'] = true;
+			}
 		}
 		return $data;
 	}
@@ -352,47 +344,17 @@ class ACLStorageWrapper extends Wrapper {
 	}
 
 	public function getDirectoryContent($directory): \Traversable {
-		$yielded = [];
 		foreach ($this->getWrapperStorage()->getDirectoryContent($directory) as $data) {
 			$data['scan_permissions'] = isset($data['scan_permissions']) ? $data['scan_permissions'] : $data['permissions'];
 			$fullPath = rtrim($directory, '/') . '/' . $data['name'];
 			$data['permissions'] &= $this->getACLPermissionsForPath($fullPath);
-
-			if ($data['permissions'] > 0) {
-				$yielded[$data['name']] = true;
-				yield $data;
+			
+			// 添加隐藏可见标记
+			if ($this->isHiddenVisibleDirectory($fullPath)) {
+				$data['isHiddenVisible'] = true;
 			}
-		}
 
-		if ($this->fileAclManager !== null && $this->user !== null) {
-			$relativePath = $this->getRelativePath($directory);
-			$visibleChildren = $this->fileAclManager->getVisibleChildren($this->user, $this->folderId, $relativePath);
-			foreach ($visibleChildren as $child) {
-				if (!isset($yielded[$child])) {
-					$childPath = $directory ? $directory . '/' . $child : $child;
-					$metaData = parent::getMetaData($childPath);
-					if ($metaData) {
-						$metaData['scan_permissions'] = $metaData['permissions'];
-						$metaData['permissions'] = $this->getACLPermissionsForPath($childPath);
-						yield $metaData;
-					}
-				}
-			}
-		}
-
-		$aclVisibleChildren = $this->aclManager->getVisibleChildren(ltrim($directory, '/'));
-		foreach ($aclVisibleChildren as $child) {
-			if (!isset($yielded[$child])) {
-				$childPath = $directory ? $directory . '/' . $child : $child;
-				$metaData = parent::getMetaData($childPath);
-				if ($metaData) {
-					$metaData['scan_permissions'] = $metaData['permissions'];
-					$metaData['permissions'] = $this->getACLPermissionsForPath($childPath);
-					if ($metaData['permissions'] > 0) {
-						yield $metaData;
-					}
-				}
-			}
+			yield $data;
 		}
 	}
 }

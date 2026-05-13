@@ -9,7 +9,6 @@ namespace OCA\GroupFolders\Controller;
 
 use OC\AppFramework\OCS\V1Response;
 use OCA\GroupFolders\Folder\FolderManager;
-use OCA\GroupFolders\FileAcl\FileAclManager;
 use OCA\GroupFolders\Mount\MountProvider;
 use OCA\GroupFolders\ResponseDefinitions;
 use OCA\GroupFolders\Service\DelegationService;
@@ -41,7 +40,6 @@ class FolderController extends OCSController {
 	private FoldersFilter $foldersFilter;
 	private DelegationService $delegationService;
 	private IGroupManager $groupManager;
-	private FileAclManager $fileAclManager;
 
 	public function __construct(
 		string $AppName,
@@ -53,7 +51,6 @@ class FolderController extends OCSController {
 		FoldersFilter $foldersFilter,
 		DelegationService $delegationService,
 		IGroupManager $groupManager,
-		FileAclManager $fileAclManager,
 	) {
 		parent::__construct($AppName, $request);
 		$this->foldersFilter = $foldersFilter;
@@ -67,7 +64,6 @@ class FolderController extends OCSController {
 		});
 		$this->delegationService = $delegationService;
 		$this->groupManager = $groupManager;
-		$this->fileAclManager = $fileAclManager;
 	}
 
 	/**
@@ -447,60 +443,5 @@ class FolderController extends OCSController {
 			'groups' => $groups,
 			'circles' => $circles
 		]);
-	}
-
-	/**
-	 * Get file-level ACL rules for a group folder
-	 * @NoAdminRequired
-	 * @RequireGroupFolderAdmin
-	 * @param int $id ID of the Groupfolder
-	 * @param int $fileId Optional file ID to filter by
-	 * @return DataResponse<Http::STATUS_OK, array, array{}>
-	 *
-	 * 200: File ACL rules returned
-	 */
-	public function getFileAcls(int $id, int $fileId = 0): DataResponse {
-		if ($fileId > 0) {
-			$rules = $this->fileAclManager->getPermissionsForFile($id, $fileId);
-		} else {
-			$rules = $this->fileAclManager->getAllFileAclsForFolder($id);
-		}
-		return new DataResponse($rules);
-	}
-
-	/**
-	 * Add or update a file-level ACL rule
-	 * @NoAdminRequired
-	 * @RequireGroupFolderAdmin
-	 * @param int $id ID of the Groupfolder
-	 * @param int $fileId File ID in filecache
-	 * @param string $filePath Path within the group folder
-	 * @param string $mappingType Type of mapping (user/group)
-	 * @param string $mappingId ID of the user/group
-	 * @param int $permissions Permission bits
-	 * @return DataResponse<Http::STATUS_OK, array{success: true}, array{}>
-	 *
-	 * 200: File ACL rule added/updated successfully
-	 */
-	public function addFileAcl(int $id, int $fileId, string $filePath, string $mappingType, string $mappingId, int $permissions): DataResponse {
-		$this->fileAclManager->addPermission($id, $fileId, $filePath, $mappingType, $mappingId, $permissions);
-		return new DataResponse(['success' => true]);
-	}
-
-	/**
-	 * Remove a file-level ACL rule
-	 * @NoAdminRequired
-	 * @RequireGroupFolderAdmin
-	 * @param int $id ID of the Groupfolder
-	 * @param int $fileId File ID in filecache
-	 * @param string $mappingType Type of mapping (user/group)
-	 * @param string $mappingId ID of the user/group
-	 * @return DataResponse<Http::STATUS_OK, array{success: true}, array{}>
-	 *
-	 * 200: File ACL rule removed successfully
-	 */
-	public function removeFileAcl(int $id, int $fileId, string $mappingType, string $mappingId): DataResponse {
-		$this->fileAclManager->removePermission($id, $fileId, $mappingType, $mappingId);
-		return new DataResponse(['success' => true]);
 	}
 }

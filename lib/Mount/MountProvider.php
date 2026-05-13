@@ -209,15 +209,27 @@ class MountProvider implements IMountProvider {
 
 		// apply acl before jail
 		if ($acl && $user) {
+			$isAclManager = $this->folderManager->canManageACL($id, $user);
 			$inShare = !\OC::$CLI && ($this->getCurrentUID() === null || $this->getCurrentUID() !== $user->getUID());
 			$aclManager ??= $this->aclManagerFactory->getACLManager($user, $this->getRootStorageId());
-			$aclRootPermissions = $aclManager->getPermissionsForPathFromRules($rootPath, $rootRules);
+			if ($isAclManager) {
+				$aclRootPermissions = Constants::PERMISSION_ALL;
+			} elseif ($aclManager->hasAclRulesForPath($rootPath)) {
+				$aclRootPermissions = $aclManager->getPermissionsForPathFromRules($rootPath, $rootRules);
+			} else {
+				$aclRootPermissions = 0;
+			}
 			$storage = new ACLStorageWrapper([
 				'storage' => $storage,
 				'acl_manager' => $aclManager,
 				'in_share' => $inShare,
+				'is_acl_manager' => $isAclManager,
 			]);
 			$cacheEntry['permissions'] &= $aclRootPermissions;
+			if (!$cacheEntry['permissions'] && $aclManager->hasChildWithReadOrEditPermission($rootPath)) {
+				$cacheEntry['permissions'] = Constants::PERMISSION_READ;
+				$cacheEntry['isHiddenVisible'] = true;
+			}
 		}
 
 		$quotaStorage = $this->getGroupFolderStorage($id, $storage, $user, $rootPath, $quota, $cacheEntry);

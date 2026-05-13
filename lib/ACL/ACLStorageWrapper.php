@@ -19,33 +19,45 @@ class ACLStorageWrapper extends Wrapper {
 	private $inShare;
 	/** @var bool 是否启用隐藏可见功能 */
 	private $enableHiddenVisibility = true;
+	/** @var bool 是否为ACL管理员 */
+	private $isAclManager = false;
 
 	public function __construct($arguments) {
 		parent::__construct($arguments);
 		$this->aclManager = $arguments['acl_manager'];
 		$this->inShare = $arguments['in_share'];
+		if (isset($arguments['is_acl_manager'])) {
+			$this->isAclManager = $arguments['is_acl_manager'];
+		}
 	}
 
 	private function getACLPermissionsForPath(string $path) {
+		if ($this->isAclManager) {
+			return Constants::PERMISSION_ALL;
+		}
+
+		$hasAclRules = $this->aclManager->hasAclRulesForPath($path);
+		if (!$hasAclRules) {
+			if ($this->enableHiddenVisibility && parent::is_dir($path)) {
+				if ($this->aclManager->hasChildWithReadOrEditPermission($path)) {
+					return Constants::PERMISSION_READ;
+				}
+			}
+			return 0;
+		}
+
 		$permissions = $this->aclManager->getACLPermissionsForPath($path);
 
-		// if there is no read permissions, than deny everything
 		if ($this->inShare) {
 			$canRead = $permissions & (Constants::PERMISSION_READ + Constants::PERMISSION_SHARE);
 		} else {
 			$canRead = $permissions & Constants::PERMISSION_READ;
 		}
 		
-		// 如果没有读权限，检查是否有子项有读/编辑权限（隐藏可见功能）
 		if (!$canRead && $this->enableHiddenVisibility) {
-			// 仅对目录应用隐藏可见功能
 			if (parent::is_dir($path)) {
 				$hasChildPermission = $this->aclManager->hasChildWithReadOrEditPermission($path);
 				if ($hasChildPermission) {
-					// 返回0权限：可见但不可操作
-					// 注意：返回0会让目录不可读，所以我们需要特殊处理
-					// 通过在metadata中标记isHiddenVisible，让前端知道这是仅回显目录
-					// 这里返回PERMISSION_READ只是为了让目录可见
 					return Constants::PERMISSION_READ;
 				}
 			}
@@ -240,7 +252,7 @@ class ACLStorageWrapper extends Wrapper {
 			$storage = $this;
 		}
 		$sourceCache = parent::getCache($path, $storage);
-		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare);
+		return new ACLCacheWrapper($sourceCache, $this->aclManager, $this->inShare, $this->isAclManager);
 	}
 
 	public function getMetaData($path) {

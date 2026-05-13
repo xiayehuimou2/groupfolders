@@ -330,6 +330,22 @@ class TrashBackend implements ITrashBackend {
 		string $path,
 		int $permission = Constants::PERMISSION_READ
 	): bool {
+		$path = ltrim($path, '/');
+		if (strpos($path, '__groupfolders/') === 0) {
+			$parts = explode('/', $path, 4);
+			if (isset($parts[1]) && $parts[1] === 'trash' && isset($parts[2]) && is_numeric($parts[2])) {
+				$folderId = (int)$parts[2];
+				if ($this->folderManager->canManageACL($folderId, $user)) {
+					return true;
+				}
+			} elseif (isset($parts[1]) && is_numeric($parts[1])) {
+				$folderId = (int)$parts[1];
+				if ($this->folderManager->canManageACL($folderId, $user)) {
+					return true;
+				}
+			}
+		}
+
 		$activePermissions = $this->aclManagerFactory->getACLManager($user)
 			->getACLPermissionsForPath($path);
 		return (bool)($activePermissions & $permission);

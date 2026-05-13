@@ -17,15 +17,23 @@ use OCP\Files\Search\ISearchQuery;
 class ACLCacheWrapper extends CacheWrapper {
 	private ACLManager $aclManager;
 	private bool $inShare;
+	private bool $isAclManager = false;
 
 	private function getACLPermissionsForPath(string $path, array $rules = []) {
+		if ($this->isAclManager) {
+			return Constants::PERMISSION_ALL;
+		}
+
+		if (!$this->aclManager->hasAclRulesForPath($path)) {
+			return 0;
+		}
+
 		if ($rules) {
 			$permissions = $this->aclManager->getPermissionsForPathFromRules($path, $rules);
 		} else {
 			$permissions = $this->aclManager->getACLPermissionsForPath($path);
 		}
 
-		// if there is no read permissions, than deny everything
 		if ($this->inShare) {
 			$minPermissions = Constants::PERMISSION_READ + Constants::PERMISSION_SHARE;
 		} else {
@@ -35,10 +43,11 @@ class ACLCacheWrapper extends CacheWrapper {
 		return $canRead ? $permissions : 0;
 	}
 
-	public function __construct(ICache $cache, ACLManager $aclManager, bool $inShare) {
+	public function __construct(ICache $cache, ACLManager $aclManager, bool $inShare, bool $isAclManager = false) {
 		parent::__construct($cache);
 		$this->aclManager = $aclManager;
 		$this->inShare = $inShare;
+		$this->isAclManager = $isAclManager;
 	}
 
 	protected function formatCacheEntry($entry, array $rules = []) {

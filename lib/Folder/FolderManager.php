@@ -489,13 +489,13 @@ class FolderManager {
 	 * @return list<GroupFoldersGroup>
 	 */
 	public function searchGroups(int $id, string $search = ''): array {
-		$groups = $this->getGroups($id);
-		if ($search === '') {
-			return $groups;
-		}
-		return array_values(array_filter($groups, function ($group) use ($search) {
-			return (stripos($group['gid'], $search) !== false) || (stripos($group['displayname'], $search) !== false);
-		}));
+		$groups = $this->groupManager->search($search);
+		return array_map(function ($group) {
+			return [
+				'gid' => $group->getGID(),
+				'displayname' => $group->getDisplayName()
+			];
+		}, $groups);
 	}
 
 	/**
@@ -967,14 +967,19 @@ class FolderManager {
 		$isAdmin = $this->groupManager->isAdmin($user->getUID());
 		if (!$isAdmin && $rootStorageId > 0) {
 			$folders = array_filter($folders, function (array $folder) use ($user, $rootStorageId): bool {
-				// If ACL is not enabled, show the folder
 				if (!$folder['acl']) {
 					return true;
 				}
 
-				// If ACL is enabled, check if there are ACL rules on the root directory
-				// Only show the folder if there are ACL rules on the root
-				return $this->hasRootAclRules($folder['folder_id'], $user, $rootStorageId);
+				if ($this->canManageACL($folder['folder_id'], $user)) {
+					return true;
+				}
+
+				if ($this->hasRootAclRules($folder['folder_id'], $user, $rootStorageId)) {
+					return true;
+				}
+
+				return $this->hasChildAclRules($folder['folder_id'], $user, $rootStorageId);
 			});
 		}
 
@@ -1105,5 +1110,30 @@ class FolderManager {
 
 		$count = $query->executeQuery()->rowCount();
 		return $count > 0;
+	}
+
+	private function hasChildAclRules(int $folderId, IUser $user, int $rootStorageId): bool {
+		$prefix = '__groupfolders/' . $folderId;
+
+		$userMappings = $this->userMappingManager->getMappingsForUser($user);
+		if (empty($userMappings)) {
+			return false;
+		}
+
+		$query = $this->connection->getQueryBuilder();
+		$query->select('a.fileid')
+			->from('group_folders_acl', 'a')
+			->innerJoin('a', 'filecache', 'f', $query->expr()->eq('f.fileid', 'a.fileid'))
+			->where($query->expr()->like('f.path', $query->createNamedParameter($this->connection->escapeLikeParameter($prefix) . '/%')))
+			->andWhere($query->expr()->eq('f.storage', $query->createNamedParameter($rootStorageId, IQueryBuilder::PARAM_INT)))
+			->andWhere($query->expr()->orX(...array_map(function ($userMapping) use ($query) {
+				return $query->expr()->andX(
+					$query->expr()->eq('a.mapping_type', $query->createNamedParameter($userMapping->getType())),
+					$query->expr()->eq('a.mapping_id', $query->createNamedParameter($userMapping->getId()))
+				);
+			}, $userMappings)));
+
+		$row = $query->executeQuery()->fetch();
+		return (bool)$row;
 	}
 }

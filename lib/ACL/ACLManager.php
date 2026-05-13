@@ -151,7 +151,30 @@ class ACLManager {
 		$path = ltrim($path, '/');
 		$rules = $this->getRules($this->getRelevantPaths($path));
 
+		$hasAnyRules = false;
+		foreach ($rules as $rulesForPath) {
+			if (!empty($rulesForPath)) {
+				$hasAnyRules = true;
+				break;
+			}
+		}
+
+		if (!$hasAnyRules) {
+			return 0;
+		}
+
 		return $this->calculatePermissionsForPath($rules);
+	}
+
+	public function hasAclRulesForPath(string $path): bool {
+		$path = ltrim($path, '/');
+		$rules = $this->getRules($this->getRelevantPaths($path));
+		foreach ($rules as $rulesForPath) {
+			if (!empty($rulesForPath)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -164,6 +187,18 @@ class ACLManager {
 		$rules = $this->getRules($this->getRelevantPaths($path));
 
 		$rules[$path] = $this->filterApplicableRulesToUser($newRules);
+
+		$hasAnyRules = false;
+		foreach ($rules as $rulesForPath) {
+			if (!empty($rulesForPath)) {
+				$hasAnyRules = true;
+				break;
+			}
+		}
+
+		if (!$hasAnyRules) {
+			return Constants::PERMISSION_ALL;
+		}
 
 		return $this->calculatePermissionsForPath($rules);
 	}
@@ -185,23 +220,6 @@ class ACLManager {
 	 * @return int
 	 */
 	private function calculatePermissionsForPath(array $rules): int {
-		// given the following rules
-		//
-		// | Folder Rule | Read | Update | Share | Delete |
-		// |-------------|------|--------|-------|--------|
-		// | a: g1       | 1    | 1      | 1     | 1      |
-		// | a: g2       | -    | -      | -     | -      |
-		// | a/b: g1     | -    | -      | -     | 0      |
-		// | a/b: g2     | 0    | -      | -     | -      |
-		// |-------------|------|--------|-------|--------|
-		//
-		// and a user that is a member of g1 and g2
-		//
-		// Without `inheritMergePerUser` the user will not have access to `a/b`
-		// as the merged rules for `a/b` ("-read,-delete") will overwrite the merged for `a` ("+read,+write+share+delete")
-		//
-		// With b`inheritMergePerUser` the user will have access to `a/b`
-		// as the applied rules for `g1` ("+read,+write+share") merges with the applied rules for `g2` ("-read")
 		if ($this->inheritMergePerUser) {
 			// first combine all rules for the same user-mapping by path order
 			// then merge the results with allow overwrites deny

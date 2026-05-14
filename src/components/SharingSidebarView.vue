@@ -235,7 +235,7 @@ export default {
 			return (item) => {
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
 				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
-				const hasEdit = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+				const hasEdit = (item.permissions & EDIT_PERMS) !== 0;
 				
 				if (hasEdit && hasRead) {
 					return { label: t('groupfolders', 'Edit'), value: 'edit' };
@@ -250,7 +250,7 @@ export default {
 				if (!item) return t('groupfolders', 'No permission');
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
 				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
-				const hasEdit = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+				const hasEdit = (item.permissions & EDIT_PERMS) !== 0;
 				
 				if (hasEdit && hasRead) {
 					return t('groupfolders', 'Edit');
@@ -264,7 +264,7 @@ export default {
 			return (item) => {
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
 				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
-				const hasEdit = (item.permissions & EDIT_PERMS) === EDIT_PERMS;
+				const hasEdit = (item.permissions & EDIT_PERMS) !== 0;
 				
 				if (hasEdit && hasRead) {
 					return { label: t('groupfolders', 'Edit'), value: 'edit' };

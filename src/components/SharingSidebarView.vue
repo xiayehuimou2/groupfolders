@@ -3,7 +3,7 @@
   - SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-	<div v-if="aclEnabled && !loading" id="groupfolder-acl-container">
+	<div v-if="aclEnabled && !loading" id="groupfolder-acl-container" :class="{ 'admin-mode': isAdmin }">
 		<div class="acl-add-row">
 			<NcButton v-if="isAdmin && !loading && !showAclCreate"
 				@click="toggleAclCreate">
@@ -86,10 +86,12 @@
 					</span>
 					<NcSelect v-else
 						ref="permissionSelect"
+						class="permission-select"
 						:options="permissionOptions"
 						:value="getPermissionOption(item)"
 						:disabled="loading"
 						:placeholder="t('groupfolders', 'No permission')"
+						:append-to-body="false"
 						@input="changePermission(item, $event)"
 						@close="stopEditing" />
 				</td>
@@ -465,7 +467,7 @@ export default {
 
 <style scoped>
 	#groupfolder-acl-container {
-		margin-bottom: 20px;
+		margin-top: -28px;
 	}
 
 	.groupfolder-entry {
@@ -524,7 +526,7 @@ export default {
 	}
 
 	.permissions-column {
-		width: 200px !important;
+		width: 120px !important;
 		padding: 3px;
 		cursor: pointer;
 	}
@@ -539,8 +541,31 @@ export default {
 		background-color: var(--color-background-hover);
 	}
 
-	.permissions-column .multiselect {
-		width: 100%;
+	/* 权限下拉框样式 */
+	.permission-select {
+		width: 142px !important;
+		max-width: 142px !important;
+		min-width: 142px !important;
+	}
+
+	/* 权限下拉框激活状态 */
+	.permission-select.is-open {
+		width: 142px !important;
+	}
+
+	/* 权限下拉框内容弹出层 - 针对挂载到 body 的情况 */
+	.vs__dropdown-menu {
+		width: 142px !important;
+		min-width: 142px !important;
+		max-width: 142px !important;
+		box-sizing: border-box !important;
+	}
+
+	/* 权限下拉框选项 */
+	.vs__dropdown-option {
+		width: 100% !important;
+		box-sizing: border-box !important;
+		padding: 0 8px !important;
 	}
 
 	.state-column {
@@ -582,10 +607,15 @@ export default {
 	}
 
 	.acl-add-row {
-		min-height: 44px;
-		margin-bottom: 5px;
+		min-height: 34px;
+		margin-bottom: 0;
 		display: flex;
 		align-items: center;
+	}
+
+	/* 普通用户模式下隐藏空白区域 */
+	#groupfolder-acl-container:not(.admin-mode) .acl-add-row {
+		display: none;
 	}
 
 	.acl-select-wrapper {

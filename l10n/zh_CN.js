@@ -16,7 +16,7 @@ OC.L10N.register(
     "Group" : "群组",
     "Team" : "团队",
     "Team folder" : "团队文件夹",
-    "Read" : "读取",
+    "Read" : "只读",
     "Edit" : "编辑",
     "Write" : "写入",
     "Create" : "创建",

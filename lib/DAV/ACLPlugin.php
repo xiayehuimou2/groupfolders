@@ -35,6 +35,7 @@ class ACLPlugin extends ServerPlugin {
 	public const INHERITED_ACL_LIST = '{http://nextcloud.org/ns}inherited-acl-list';
 	public const GROUP_FOLDER_ID = '{http://nextcloud.org/ns}group-folder-id';
 	public const IS_HIDDEN_VISIBLE = '{http://nextcloud.org/ns}is-hidden-visible';
+	public const ACL_NODE_PATH = '{http://nextcloud.org/ns}acl-node-path';
 
 	private ?Server $server = null;
 	private ?IUser $user = null;
@@ -56,6 +57,20 @@ class ACLPlugin extends ServerPlugin {
 			return false;
 		}
 		return $this->folderManager->canManageACL($folderId, $this->user);
+	}
+
+	private function canManageACLForNode($fileInfo, $mount): bool {
+		if ($this->isAdmin($fileInfo->getPath())) {
+			return true;
+		}
+		if ($this->user !== null) {
+			$internalPath = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
+			$aclManager = $this->aclManagerFactory->getACLManager($this->user);
+			if ($aclManager->hasManageACLPermission($internalPath)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public function initialize(Server $server): void {
@@ -100,7 +115,7 @@ class ACLPlugin extends ServerPlugin {
 
 		$propFind->handle(self::ACL_LIST, function () use ($fileInfo, $mount) {
 			$path = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
-			if ($this->isAdmin($fileInfo->getPath())) {
+			if ($this->canManageACLForNode($fileInfo, $mount)) {
 				$rules = $this->ruleManager->getAllRulesForPaths($mount->getNumericStorageId(), [$path]);
 			} else {
 				$rules = $this->ruleManager->getRulesForFilesByPath($this->user, $mount->getNumericStorageId(), [$path]);
@@ -113,7 +128,7 @@ class ACLPlugin extends ServerPlugin {
 			$parentPaths = array_map(function (string $internalPath) use ($mount) {
 				return trim($mount->getSourcePath() . '/' . $internalPath, '/');
 			}, $parentInternalPaths);
-			if ($this->isAdmin($fileInfo->getPath())) {
+			if ($this->canManageACLForNode($fileInfo, $mount)) {
 				$rulesByPath = $this->ruleManager->getAllRulesForPaths($mount->getNumericStorageId(), $parentPaths);
 			} else {
 				$rulesByPath = $this->ruleManager->getRulesForFilesByPath($this->user, $mount->getNumericStorageId(), $parentPaths);
@@ -131,7 +146,7 @@ class ACLPlugin extends ServerPlugin {
 						$mappings[$mappingKey] = $rule->getUserMapping();
 					}
 					if (!isset($inheritedPermissionsByMapping[$mappingKey])) {
-						$inheritedPermissionsByMapping[$mappingKey] = Constants::PERMISSION_ALL;
+						$inheritedPermissionsByMapping[$mappingKey] = Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
 					}
 					if (!isset($inheritedMaskByMapping[$mappingKey])) {
 						$inheritedMaskByMapping[$mappingKey] = 0;
@@ -160,22 +175,18 @@ class ACLPlugin extends ServerPlugin {
 			return $this->folderManager->getFolderAclEnabled($folderId);
 		});
 
-		$propFind->handle(self::ACL_CAN_MANAGE, function () use ($fileInfo) {
-			return $this->isAdmin($fileInfo->getPath());
+		$propFind->handle(self::ACL_CAN_MANAGE, function () use ($fileInfo, $mount) {
+			return $this->canManageACLForNode($fileInfo, $mount);
 		});
 
-		// 添加隐藏可见属性
 		$propFind->handle(self::IS_HIDDEN_VISIBLE, function () use ($fileInfo, $mount) {
 			$path = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
 			$permissions = $fileInfo->getPermissions();
 			
-			// 如果文件本身没有权限，但通过 ACLStorageWrapper 的隐藏可见功能获得了仅读权限
-			// 则标记为隐藏可见
 			$hasBasicRead = ($permissions & Constants::PERMISSION_READ) !== 0;
 			$hasOtherPerms = ($permissions & (Constants::PERMISSION_UPDATE | Constants::PERMISSION_CREATE | Constants::PERMISSION_DELETE | Constants::PERMISSION_SHARE)) !== 0;
 			
 			if ($hasBasicRead && !$hasOtherPerms) {
-				// 检查是否为目录
 				if ($fileInfo->getType() === \OCP\Files\FileInfo::TYPE_FOLDER) {
 					$aclManager = $this->aclManagerFactory->getACLManager($this->user);
 					return $aclManager->isEchoOnlyDirectory($path);
@@ -183,6 +194,10 @@ class ACLPlugin extends ServerPlugin {
 			}
 			
 			return false;
+		});
+
+		$propFind->handle(self::ACL_NODE_PATH, function () use ($fileInfo, $mount) {
+			return trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
 		});
 	}
 
@@ -193,7 +208,7 @@ class ACLPlugin extends ServerPlugin {
 		}
 		$fileInfo = $node->getFileInfo();
 		$mount = $fileInfo->getMountPoint();
-		if (!$mount instanceof GroupMountPoint || !$this->isAdmin($fileInfo->getPath())) {
+		if (!$mount instanceof GroupMountPoint || !$this->canManageACLForNode($fileInfo, $mount)) {
 			return;
 		}
 
@@ -242,9 +257,11 @@ class ACLPlugin extends ServerPlugin {
 			}
 
 			$aclManager = $this->aclManagerFactory->getACLManager($this->user);
-			$newPermissions = $aclManager->testACLPermissionsForPath($path, $rules);
-			if (!($newPermissions & Constants::PERMISSION_READ)) {
-				throw new BadRequest($this->l10n->t('You can not remove your own read permission.'));
+			if (!$this->canManageACLForNode($fileInfo, $mount)) {
+				$newPermissions = $aclManager->testACLPermissionsForPath($path, $rules);
+				if (!($newPermissions & Constants::PERMISSION_READ)) {
+					throw new BadRequest($this->l10n->t('You can not remove your own read permission.'));
+				}
 			}
 
 			$existingRules = array_reduce(
@@ -257,10 +274,11 @@ class ACLPlugin extends ServerPlugin {
 
 
 			$deletedRules = array_udiff($existingRules, $rules, function ($obj_a, $obj_b) {
-				return (
-					$obj_a->getUserMapping()->getType() === $obj_b->getUserMapping()->getType() &&
-					$obj_a->getUserMapping()->getId() === $obj_b->getUserMapping()->getId()
-				) ? 0 : -1;
+				$typeCmp = strcmp($obj_a->getUserMapping()->getType(), $obj_b->getUserMapping()->getType());
+				if ($typeCmp !== 0) {
+					return $typeCmp;
+				}
+				return strcmp($obj_a->getUserMapping()->getId(), $obj_b->getUserMapping()->getId());
 			});
 			foreach ($deletedRules as $deletedRule) {
 				$this->ruleManager->deleteRule($deletedRule);

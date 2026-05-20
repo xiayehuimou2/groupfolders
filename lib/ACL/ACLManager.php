@@ -220,32 +220,21 @@ class ACLManager {
 	 * @return int
 	 */
 	private function calculatePermissionsForPath(array $rules): int {
-		if ($this->inheritMergePerUser) {
-			// first combine all rules for the same user-mapping by path order
-			// then merge the results with allow overwrites deny
-			$rulesPerMapping = [];
-			foreach ($rules as $rulesForPath) {
-				foreach ($rulesForPath as $rule) {
-					$mapping = $rule->getUserMapping();
-					$key = $mapping->getType() . '/' . $mapping->getId();
-					if (!isset($rulesPerMapping[$key])) {
-						$rulesPerMapping[$key] = Rule::defaultRule();
-					}
-
-					$rulesPerMapping[$key]->applyRule($rule);
+		$rulesPerMapping = [];
+		foreach ($rules as $rulesForPath) {
+			foreach ($rulesForPath as $rule) {
+				$mapping = $rule->getUserMapping();
+				$key = $mapping->getType() . '/' . $mapping->getId();
+				if (!isset($rulesPerMapping[$key])) {
+					$rulesPerMapping[$key] = Rule::defaultRule();
 				}
-			}
 
-			$mergedRule = Rule::mergeRules($rulesPerMapping);
-			return $mergedRule->applyPermissions(Constants::PERMISSION_ALL);
-		} else {
-			// first combine all rules with the same path, then apply them on top of the current permissions
-			// since $rules is sorted parent first rules for subfolders overwrite the rules from the parent
-			return array_reduce($rules, function (int $permissions, array $rules): int {
-				$mergedRule = Rule::mergeRules($rules);
-				return $mergedRule->applyPermissions($permissions);
-			}, Constants::PERMISSION_ALL);
+				$rulesPerMapping[$key]->applyRule($rule);
+			}
 		}
+
+		$mergedRule = Rule::mergeRules($rulesPerMapping);
+		return $mergedRule->applyPermissions(Constants::PERMISSION_ALL);
 	}
 
 	/**
@@ -258,19 +247,12 @@ class ACLManager {
 		$path = ltrim($path, '/');
 		$rules = $this->ruleManager->getRulesForPrefix($this->user, $this->getRootStorageId(), $path);
 
-		if ($this->inheritMergePerUser) {
-			$pathsWithRules = array_keys($rules);
-			$permissions = Constants::PERMISSION_ALL;
-			foreach ($pathsWithRules as $path) {
-				$permissions &= $this->getACLPermissionsForPath($path);
-			}
-			return $permissions;
-		} else {
-			return array_reduce($rules, function (int $permissions, array $rules): int {
-				$mergedRule = Rule::mergeRules($rules);
-				return $mergedRule->applyDenyPermissions($permissions);
-			}, Constants::PERMISSION_ALL);
+		$pathsWithRules = array_keys($rules);
+		$permissions = Constants::PERMISSION_ALL;
+		foreach ($pathsWithRules as $path) {
+			$permissions &= $this->getACLPermissionsForPath($path);
 		}
+		return $permissions;
 	}
 
 	/**
@@ -335,6 +317,12 @@ class ACLManager {
 		
 		// 检查是否有子项有权限（如果有，则该目录是仅回显）
 		return $this->hasChildWithReadOrEditPermission($path);
+	}
+
+	public function hasManageACLPermission(string $path): bool {
+		$path = ltrim($path, '/');
+		$permissions = $this->getACLPermissionsForPath($path);
+		return ($permissions & Rule::PERMISSION_MANAGE_ACL) !== 0;
 	}
 
 	public function preloadRulesForFolder(string $path): void {

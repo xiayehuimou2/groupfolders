@@ -8,6 +8,7 @@
 namespace OCA\GroupFolders\Controller;
 
 use OC\AppFramework\OCS\V1Response;
+use OCA\GroupFolders\ACL\ACLManagerFactory;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCA\GroupFolders\Mount\MountProvider;
 use OCA\GroupFolders\ResponseDefinitions;
@@ -40,6 +41,7 @@ class FolderController extends OCSController {
 	private FoldersFilter $foldersFilter;
 	private DelegationService $delegationService;
 	private IGroupManager $groupManager;
+	private ACLManagerFactory $aclManagerFactory;
 
 	public function __construct(
 		string $AppName,
@@ -51,6 +53,7 @@ class FolderController extends OCSController {
 		FoldersFilter $foldersFilter,
 		DelegationService $delegationService,
 		IGroupManager $groupManager,
+		ACLManagerFactory $aclManagerFactory,
 	) {
 		parent::__construct($AppName, $request);
 		$this->foldersFilter = $foldersFilter;
@@ -64,6 +67,7 @@ class FolderController extends OCSController {
 		});
 		$this->delegationService = $delegationService;
 		$this->groupManager = $groupManager;
+		$this->aclManagerFactory = $aclManagerFactory;
 	}
 
 	/**
@@ -430,13 +434,20 @@ class FolderController extends OCSController {
 	 *
 	 * 200: ACL Mappings returned
 	 */
-	public function aclMappingSearch(int $id, string $search = ''): DataResponse {
+	public function aclMappingSearch(int $id, string $search = '', string $path = ''): DataResponse {
 		$users = $groups = $circles = [];
 
 		if ($this->manager->canManageACL($id, $this->user) === true) {
 			$groups = $this->manager->searchGroups($id, $search);
 			$users = $this->manager->searchUsers($id, $search);
 			$circles = $this->manager->searchCircles($id, $search);
+		} elseif ($this->user !== null && $path !== '') {
+			$aclManager = $this->aclManagerFactory->getACLManager($this->user);
+			if ($aclManager->hasManageACLPermission($path)) {
+				$groups = $this->manager->searchGroups($id, $search);
+				$users = $this->manager->searchUsers($id, $search);
+				$circles = $this->manager->searchCircles($id, $search);
+			}
 		}
 		return new DataResponse([
 			'users' => $users,

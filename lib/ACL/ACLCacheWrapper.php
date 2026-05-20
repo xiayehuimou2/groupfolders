@@ -21,7 +21,7 @@ class ACLCacheWrapper extends CacheWrapper {
 
 	private function getACLPermissionsForPath(string $path, array $rules = []) {
 		if ($this->isAclManager) {
-			return Constants::PERMISSION_ALL;
+			return Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
 		}
 
 		if (!$this->aclManager->hasAclRulesForPath($path)) {

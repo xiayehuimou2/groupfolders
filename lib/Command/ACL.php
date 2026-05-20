@@ -84,7 +84,7 @@ class ACL extends FolderCommand {
 				} else {
 					$permissions = $aclManager->getACLPermissionsForPath($jailPath . rtrim('/' . $path, '/'));
 				}
-				$permissionString = Rule::formatRulePermissions(Constants::PERMISSION_ALL, $permissions);
+				$permissionString = Rule::formatRulePermissions(Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL, $permissions);
 				$output->writeln($permissionString);
 				return 0;
 			} else {

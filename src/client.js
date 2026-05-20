@@ -155,6 +155,11 @@ function patchFilesClient(client) {
 			data.aclCanManage = !!aclCanManage
 		}
 
+		const aclNodePath = props[ACL_PROPERTIES.PROPERTY_ACL_NODE_PATH]
+		if (typeof aclNodePath !== 'undefined') {
+			data.aclNodePath = aclNodePath
+		}
+
 		const acls = props[ACL_PROPERTIES.PROPERTY_ACL_LIST] || []
 		const inheritedAcls = props[ACL_PROPERTIES.PROPERTY_INHERITED_ACL_LIST] || []
 
@@ -182,7 +187,7 @@ class AclDavService {
 
 	propFind(model) {
 		return client.getFileInfo(model.path + '/' + model.name, {
-			properties: [ACL_PROPERTIES.PROPERTY_ACL_LIST, ACL_PROPERTIES.PROPERTY_INHERITED_ACL_LIST, ACL_PROPERTIES.GROUP_FOLDER_ID, ACL_PROPERTIES.PROPERTY_ACL_ENABLED, ACL_PROPERTIES.PROPERTY_ACL_CAN_MANAGE],
+			properties: [ACL_PROPERTIES.PROPERTY_ACL_LIST, ACL_PROPERTIES.PROPERTY_INHERITED_ACL_LIST, ACL_PROPERTIES.GROUP_FOLDER_ID, ACL_PROPERTIES.PROPERTY_ACL_ENABLED, ACL_PROPERTIES.PROPERTY_ACL_CAN_MANAGE, ACL_PROPERTIES.PROPERTY_ACL_NODE_PATH],
 		}).then((status, fileInfo) => {
 			if (fileInfo) {
 				const aclsById = {}
@@ -222,60 +227,13 @@ class AclDavService {
 					}
 				}
 
-				// CRITICAL: Filter out ACL entries with permissions=0 (explicit deny due to inheritance removal)
-				// These MUST NOT be displayed in the UI as they represent "no permission" state
-				// When user modifies permissions later, the existing record will be updated instead of creating new one
-				
-				// Debug: log all ACLs before filtering
-				logger.debug('=== ACL FILTERING DEBUG ===');
-				logger.debug('Total aclsById count:', Object.keys(aclsById).length);
-				Object.values(aclsById).forEach((acl, idx) => {
-					logger.debug(`ACL[${idx}]:`, {
-						mappingType: acl.mappingType,
-						mappingId: acl.mappingId,
-						mappingDisplayName: acl.mappingDisplayName,
-						permissions: acl.permissions,
-						mask: acl.mask,
-						inherited: acl.inherited,
-						permissionsType: typeof acl.permissions
-					});
-				});
-
-				const filteredAcls = Object.values(aclsById).filter(acl => {
-					// ALWAYS filter out rules with permissions=0 (no permissions at all)
-					// This includes both inherited rules with no permissions and explicit deny rules
-					// IMPORTANT: Check both === 0 and == 0 to handle string/number type issues
-					if (acl.permissions === 0 || acl.permissions == 0) {
-						logger.warn('⚠️ FILTERING OUT ACL with permissions=0:', { 
-							mappingType: acl.mappingType, 
-							mappingId: acl.mappingId,
-							mappingDisplayName: acl.mappingDisplayName,
-							mask: acl.mask,
-							inherited: acl.inherited,
-							reason: 'permissions is 0 - represents deny-all rule'
-						});
-						return false;
-					}
-					logger.debug('✓ Keeping ACL:', { 
-						mappingType: acl.mappingType, 
-						mappingId: acl.mappingId,
-						permissions: acl.permissions,
-						mask: acl.mask
-					});
-					return true;
-				});
-				
-				logger.debug('=== FILTERING RESULT ===');
-				logger.debug('Before filtering:', Object.keys(aclsById).length, 'ACLs');
-				logger.debug('After filtering:', filteredAcls.length, 'ACLs');
-				logger.debug('Filtered out:', Object.keys(aclsById).length - filteredAcls.length, 'ACLs');
-
 				return {
-					acls: filteredAcls,
+					acls: Object.values(aclsById),
 					inheritedAclsById,
 					aclEnabled: fileInfo.aclEnabled,
 					aclCanManage: fileInfo.aclCanManage,
 					groupFolderId: fileInfo.groupFolderId,
+					aclNodePath: fileInfo.aclNodePath || '',
 				}
 			}
 			return null

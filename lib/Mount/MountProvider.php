@@ -11,6 +11,7 @@ use OC\Files\Storage\Wrapper\PermissionsMask;
 use OCA\GroupFolders\ACL\ACLManager;
 use OCA\GroupFolders\ACL\ACLManagerFactory;
 use OCA\GroupFolders\ACL\ACLStorageWrapper;
+use OCA\GroupFolders\ACL\Rule;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCP\Constants;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -213,7 +214,7 @@ class MountProvider implements IMountProvider {
 			$inShare = !\OC::$CLI && ($this->getCurrentUID() === null || $this->getCurrentUID() !== $user->getUID());
 			$aclManager ??= $this->aclManagerFactory->getACLManager($user, $this->getRootStorageId());
 			if ($isAclManager) {
-				$aclRootPermissions = Constants::PERMISSION_ALL;
+				$aclRootPermissions = Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
 			} elseif ($aclManager->hasAclRulesForPath($rootPath)) {
 				$aclRootPermissions = $aclManager->getPermissionsForPathFromRules($rootPath, $rootRules);
 			} else {

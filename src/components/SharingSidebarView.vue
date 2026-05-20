@@ -3,7 +3,7 @@
   - SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-	<div v-if="aclEnabled && !loading" id="groupfolder-acl-container" :class="{ 'admin-mode': isAdmin }">
+	<div v-if="aclEnabled && !loading && (isAdmin || currentUserEffectivePermission > 0)" id="groupfolder-acl-container" :class="{ 'admin-mode': isAdmin }">
 		<div class="acl-add-row">
 			<NcButton v-if="isAdmin && !loading && !showAclCreate"
 				@click="toggleAclCreate">
@@ -63,15 +63,16 @@
 				</td>
 				<td class="permissions-column">
 					<NcSelect
-						:options="[{label: t('groupfolders', 'Read'), value: 'read'}, {label: t('groupfolders', 'Edit'), value: 'edit'}]"
-						:value="getUserPermissionOption({ permissions: model.permissions, mask: 31 })"
+						:options="[{label: t('groupfolders', 'Read'), value: 'read'}, {label: t('groupfolders', 'Edit'), value: 'edit'}, {label: t('groupfolders', 'Manage'), value: 'manage'}]"
+						:value="getUserPermissionOption({ permissions: currentUserEffectivePermission, mask: 63 })"
 						:disabled="true"
+						class="permission-select"
 						:placeholder="t('groupfolders', 'No permission')" />
 				</td>
 			</tr>
 			</tbody>
 			<tbody v-else>
-			<tr v-for="item in list" :key="item.mappingType + '-' + item.mappingId">
+			<tr v-for="item in displayList" :key="item.mappingType + '-' + item.mappingId">
 				<td>
 					<NcAvatar :user="item.mappingId" :is-no-user="item.mappingType !== 'user'" :size="24" />
 				</td>
@@ -131,6 +132,7 @@ import Rule from './../model/Rule.js'
 import AclStateButton, { STATES } from './AclStateButton.vue'
 
 let searchRequestCancelSource = null
+const PERMISSION_MANAGE_ACL = 32
 
 export default {
 	name: 'SharingSidebarView',
@@ -158,6 +160,7 @@ export default {
 			aclCanManage: false,
 			showAclCreate: false,
 			groupFolderId: null,
+			aclNodePath: null,
 			loading: false,
 			isSearching: false,
 			options: [],
@@ -167,13 +170,24 @@ export default {
 			editingItemId: null,
 			permissionOptions: [
 				{ label: t('groupfolders', 'Read'), value: 'read' },
-				{ label: t('groupfolders', 'Edit'), value: 'edit' }
+				{ label: t('groupfolders', 'Edit'), value: 'edit' },
+				{ label: t('groupfolders', 'Manage'), value: 'manage' }
 			]
 		}
 	},
 	computed: {
 		isAdmin() {
 			return this.aclCanManage
+		},
+		currentUserEffectivePermission() {
+			let permissions = 0
+			for (const item of this.list) {
+				permissions |= item.permissions
+			}
+			return permissions
+		},
+		displayList() {
+			return this.list.filter(item => item.permissions !== 0)
 		},
 		isNotInherited() {
 			return (permission, mask) => {
@@ -238,8 +252,11 @@ export default {
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
 				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
 				const hasEdit = (item.permissions & EDIT_PERMS) !== 0;
+				const hasManage = (item.permissions & PERMISSION_MANAGE_ACL) !== 0;
 				
-				if (hasEdit && hasRead) {
+				if (hasManage && hasEdit && hasRead) {
+					return { label: t('groupfolders', 'Manage'), value: 'manage' };
+				} else if (hasEdit && hasRead) {
 					return { label: t('groupfolders', 'Edit'), value: 'edit' };
 				} else if (hasRead) {
 					return { label: t('groupfolders', 'Read'), value: 'read' };
@@ -253,8 +270,11 @@ export default {
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
 				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
 				const hasEdit = (item.permissions & EDIT_PERMS) !== 0;
+				const hasManage = (item.permissions & PERMISSION_MANAGE_ACL) !== 0;
 				
-				if (hasEdit && hasRead) {
+				if (hasManage && hasEdit && hasRead) {
+					return t('groupfolders', 'Manage');
+				} else if (hasEdit && hasRead) {
 					return t('groupfolders', 'Edit');
 				} else if (hasRead) {
 					return t('groupfolders', 'Read');
@@ -267,8 +287,11 @@ export default {
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE;
 				const hasRead = (item.permissions & OC.PERMISSION_READ) !== 0;
 				const hasEdit = (item.permissions & EDIT_PERMS) !== 0;
+				const hasManage = (item.permissions & PERMISSION_MANAGE_ACL) !== 0;
 				
-				if (hasEdit && hasRead) {
+				if (hasManage && hasEdit && hasRead) {
+					return { label: t('groupfolders', 'Manage'), value: 'manage' };
+				} else if (hasEdit && hasRead) {
 					return { label: t('groupfolders', 'Edit'), value: 'edit' };
 				} else if (hasRead) {
 					return { label: t('groupfolders', 'Read'), value: 'read' };
@@ -293,15 +316,23 @@ export default {
 			this.loading = true
 			this.model = JSON.parse(JSON.stringify(this.fileInfo))
 			client.propFind(this.model).then((data) => {
-				if (data.acls) {
-					this.list = data.acls
+				if (data) {
+					if (data.acls) {
+						this.list = data.acls
+					}
+					this.inheritedAclsById = data.inheritedAclsById
+					this.aclEnabled = data.aclEnabled
+					this.aclCanManage = data.aclCanManage
+					this.groupFolderId = data.groupFolderId
+					this.aclNodePath = data.aclNodePath
+					if (!this.aclCanManage) {
+						this.list = this.list.filter(item => item.permissions !== 0)
+					}
 				}
-				this.inheritedAclsById = data.inheritedAclsById
-				this.aclEnabled = data.aclEnabled
-				this.aclCanManage = data.aclCanManage
-				this.groupFolderId = data.groupFolderId
 				this.loading = false
 				this.searchMappings('')
+			}).catch(() => {
+				this.loading = false
 			})
 		},
 		getFullDisplayName(displayName, type) {
@@ -320,7 +351,7 @@ export default {
 			}
 			searchRequestCancelSource = axios.CancelToken.source()
 			this.isSearching = true
-			axios.get(generateUrl(`apps/groupfolders/folders/${this.groupFolderId}/search`) + '?format=json&search=' + query, {
+			axios.get(generateUrl(`apps/groupfolders/folders/${this.groupFolderId}/search`) + '?format=json&search=' + query + '&path=' + encodeURIComponent(this.aclNodePath || ''), {
 				cancelToken: searchRequestCancelSource.token,
 			}).then((result) => {
 				this.isSearching = false
@@ -352,8 +383,7 @@ export default {
 					}
 				})
 				this.options = [...groups, ...users, ...circles].filter((entry) => {
-					// filter out existing acl rules
-					return !this.list.find((existingAcl) => entry.unique === existingAcl.getUniqueMappingIdentifier())
+					return !this.list.find((existingAcl) => entry.unique === existingAcl.getUniqueMappingIdentifier() && existingAcl.permissions !== 0)
 				})
 			}).catch((error) => {
 				if (!axios.isCancel(error)) {
@@ -369,44 +399,49 @@ export default {
 				})
 			}
 		},
-		createAcl(option) {
+		async createAcl(option) {
 			this.value = null
-			const rule = new Rule()
-			// Default to read permission when creating new ACL
-			rule.fromValues(option.type, option.id, option.displayname, 0b11111, OC.PERMISSION_READ)
-			this.list.push(rule)
-			client.propPatch(this.model, this.list.filter(rule => !rule.inherited)).then(() => {
+			const existingIndex = this.list.findIndex(item => item.mappingType === option.type && item.mappingId === option.id)
+			if (existingIndex > -1) {
+				const existingRule = this.list[existingIndex].clone()
+				existingRule.mask = 0b111111
+				existingRule.permissions = OC.PERMISSION_READ
+				existingRule.inherited = false
+				Vue.set(this.list, existingIndex, existingRule)
+			} else {
+				const rule = new Rule()
+				rule.fromValues(option.type, option.id, option.displayname, 0b111111, OC.PERMISSION_READ)
+				this.list.push(rule)
+			}
+			try {
+				await client.propPatch(this.model, this.list.filter(r => !r.inherited))
 				this.showAclCreate = false
-			})
+			} finally {
+				this.loadAcls()
+			}
 		},
-		removeAcl(rule) {
+		async removeAcl(rule) {
 			const index = this.list.indexOf(rule)
 			
 			if (index > -1) {
-				// If the rule is inherited, we need to create an explicit rule to override it
+				let rulesToSend
 				if (rule.inherited) {
-					// Create a new rule that explicitly denies all permissions
-					// mask=31 (0b11111) means all 5 permission bits are set
-					// permissions=0 means all permissions are denied
 					const newRule = rule.clone()
 					newRule.inherited = false
-					newRule.mask = 31 // All permission bits
-					newRule.permissions = 0 // Deny all
+					newRule.mask = 63
+					newRule.permissions = 0
 					Vue.set(this.list, index, newRule)
-					
-					// Save the new rule
-					client.propPatch(this.model, [newRule]).then(() => {
-						this.loadAcls() // Reload to reflect the changes
-					})
+					rulesToSend = this.list.filter(r => !r.inherited)
 				} else {
-					// For non-inherited rules, simply remove them
-					const list = this.list.concat([]) // shallow clone
-					list.splice(index, 1)
-					client.propPatch(this.model, list.filter(rule => !rule.inherited)).then(() => {
-						this.list.splice(index, 1)
-						// Removed the logic that restores inherited ACLs when deleting a rule
-						// This ensures that when an ACL is deleted, it's completely removed rather than reverting to inherited permissions
-					})
+					this.list.splice(index, 1)
+					rulesToSend = this.list.filter(r => !r.inherited)
+					this.aclCanManage = this.currentUserEffectivePermission > 0 && (this.currentUserEffectivePermission & 32) !== 0
+				}
+				
+				try {
+					await client.propPatch(this.model, rulesToSend)
+				} finally {
+					this.loadAcls()
 				}
 			}
 		},
@@ -424,7 +459,6 @@ export default {
 		},
 		async changePermission(item, option) {
 			if (!option || !option.value) {
-				// 如果未选择有效权限，恢复原样
 				this.stopEditing()
 				return
 			}
@@ -434,14 +468,16 @@ export default {
 			item = item.clone()
 			
 			if (option.value === 'read') {
-				// Read only: allow READ, deny EDIT permissions
-				item.mask = 0b11111
+				item.mask = 0b111111
 				item.permissions = OC.PERMISSION_READ
 			} else if (option.value === 'edit') {
-				// Edit: allow READ + all EDIT permissions
 				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE
-				item.mask = 0b11111
+				item.mask = 0b111111
 				item.permissions = OC.PERMISSION_READ | EDIT_PERMS
+			} else if (option.value === 'manage') {
+				const EDIT_PERMS = OC.PERMISSION_UPDATE | OC.PERMISSION_CREATE | OC.PERMISSION_DELETE
+				item.mask = 0b111111
+				item.permissions = OC.PERMISSION_READ | EDIT_PERMS | PERMISSION_MANAGE_ACL
 			}
 			
 			item.inherited = false
@@ -449,14 +485,11 @@ export default {
 			this.loading = true
 			try {
 				await client.propPatch(this.model, this.list.filter(rule => !rule.inherited))
-				logger.debug('Permissions updated successfully')
-				await this.loadAcls()
 			} catch (error) {
-				logger.error('Failed to save changes:', { error })
 				Vue.set(this.list, index, itemRestorePoint)
-				showError(error)
+				showError(error.message || t('groupfolders', 'Failed to update permission'))
 			} finally {
-				this.loading = false
+				this.loadAcls()
 				this.stopEditing()
 			}
 		},

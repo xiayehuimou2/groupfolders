@@ -33,7 +33,7 @@ class ACLStorageWrapper extends Wrapper {
 
 	private function getACLPermissionsForPath(string $path) {
 		if ($this->isAclManager) {
-			return Constants::PERMISSION_ALL;
+			return Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
 		}
 
 		$hasAclRules = $this->aclManager->hasAclRulesForPath($path);

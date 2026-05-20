@@ -30,7 +30,10 @@ class Rule implements XmlSerializable, XmlDeserializable, \JsonSerializable {
 		'create' => Constants::PERMISSION_CREATE,
 		'delete' => Constants::PERMISSION_DELETE,
 		'share' => Constants::PERMISSION_SHARE,
+		'manage' => self::PERMISSION_MANAGE_ACL,
 	];
+
+	public const PERMISSION_MANAGE_ACL = 32;
 
 	private $userMapping;
 	private $fileId;

@@ -14,7 +14,7 @@ export default class Rule {
 		this.permissions = props[PROPERTIES.PROPERTY_ACL_PERMISSIONS]
 	}
 
-	fromValues(mappingType, mappingId, mappingDisplayName, mask = 0, permissions = 31, inherited = false) {
+	fromValues(mappingType, mappingId, mappingDisplayName, mask = 0, permissions = 63, inherited = false) {
 		this.mappingType = mappingType
 		this.mappingId = mappingId
 		this.mappingDisplayName = mappingDisplayName
@@ -22,7 +22,7 @@ export default class Rule {
 		this.permissions = permissions
 		this.inherited = inherited
 		this.inheritedMask = 0
-		this.inheritedPermissions = 31
+		this.inheritedPermissions = 63
 	}
 
 	getProperties() {

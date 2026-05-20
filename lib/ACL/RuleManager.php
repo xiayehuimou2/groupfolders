@@ -569,7 +569,7 @@ class RuleManager {
 		// Example: Parent has mask=31, permissions=1 (read-only)
 		// Wrong: (31 & 31) | (1 & 31) = 31 | 1 = 31 ❌
 		// Right: (31 & ~31) | (1 & 31) = 0 | 1 = 1 ✓
-		$effectivePermissions = \OCP\Constants::PERMISSION_ALL;
+		$effectivePermissions = \OCP\Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
 
 		foreach ($rows as $row) {
 			$beforePerms = $effectivePermissions;
@@ -590,7 +590,7 @@ class RuleManager {
 		);
 
 		return [
-			'mask' => \OCP\Constants::PERMISSION_ALL, // All bits controlled by inheritance chain
+			'mask' => \OCP\Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL,
 			'permissions' => $effectivePermissions
 		];
 	}

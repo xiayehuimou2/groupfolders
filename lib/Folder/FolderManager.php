@@ -503,12 +503,31 @@ class FolderManager {
 	 * @return list<GroupFoldersCircle>
 	 */
 	public function searchCircles(int $id, string $search = ''): array {
-		$circles = $this->getCircles($id);
-		if ($search === '') {
-			return $circles;
+		$circlesManager = $this->getCirclesManager();
+		if ($circlesManager === null) {
+			return [];
 		}
 
-		return array_values(array_filter($circles, fn (array $circle): bool => (stripos($circle['displayname'], $search) !== false)));
+		$circlesManager->startSuperSession();
+		try {
+			$circles = $circlesManager->probeCircles();
+		} catch (\Exception $e) {
+			$this->logger->warning('', ['exception' => $e]);
+			return [];
+		} finally {
+			$circlesManager->stopSession();
+		}
+
+		$result = array_map(fn (Circle $circle): array => [
+			'sid' => $circle->getSingleId(),
+			'displayname' => $circle->getDisplayName()
+		], $circles);
+
+		if ($search === '') {
+			return $result;
+		}
+
+		return array_values(array_filter($result, fn (array $circle): bool => (stripos($circle['displayname'], $search) !== false)));
 	}
 
 	/**

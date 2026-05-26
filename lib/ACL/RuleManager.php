@@ -349,7 +349,8 @@ class RuleManager {
 		$query->select(['fileid', 'path'])
 			->from('filecache')
 			->where($query->expr()->like('path', $query->createNamedParameter($this->connection->escapeLikeParameter($parentPath) . '/%')))
-			->andWhere($query->expr()->eq('storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)));
+			->andWhere($query->expr()->eq('storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)))
+			->orderBy('path', 'ASC');
 
 		$rows = $query->executeQuery()->fetchAll();
 
@@ -362,6 +363,87 @@ class RuleManager {
 				$rule->getPermissions()
 			);
 			$this->saveRule($newRule);
+		}
+	}
+
+	public function propagateRuleUpdateToChildren(Rule $rule, int $storageId, string $parentPath): void {
+		$query = $this->connection->getQueryBuilder();
+		$query->select(['f.fileid'])
+			->from('group_folders_acl', 'a')
+			->innerJoin('a', 'filecache', 'f', $query->expr()->eq('f.fileid', 'a.fileid'))
+			->where($query->expr()->like('f.path', $query->createNamedParameter($this->connection->escapeLikeParameter($parentPath) . '/%')))
+			->andWhere($query->expr()->eq('f.storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)))
+			->andWhere($query->expr()->eq('a.mapping_type', $query->createNamedParameter($rule->getUserMapping()->getType())))
+			->andWhere($query->expr()->neq('a.permissions', $query->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->andWhere($query->expr()->eq('a.mapping_id', $query->createNamedParameter($rule->getUserMapping()->getId())))
+			->orderBy('f.path', 'ASC');
+
+		$rows = $query->executeQuery()->fetchAll();
+
+		foreach ($rows as $row) {
+			$fileId = (int)$row['fileid'];
+			$newRule = new Rule(
+				$rule->getUserMapping(),
+				$fileId,
+				$rule->getMask(),
+				$rule->getPermissions()
+			);
+			$this->saveRule($newRule);
+		}
+	}
+
+	public function deleteRuleOrDeny(Rule $rule): void {
+		$query = $this->connection->getQueryBuilder();
+		$query->select('path', 'storage')
+			->from('filecache')
+			->where($query->expr()->eq('fileid', $query->createNamedParameter($rule->getFileId(), IQueryBuilder::PARAM_INT)));
+		$row = $query->executeQuery()->fetch();
+
+		if (!$row) {
+			$this->deleteRule($rule);
+			return;
+		}
+
+		$storageId = (int)$row['storage'];
+		$parentPaths = $this->getParentPaths($row['path']);
+		$inheritedPermissions = $this->getInheritedPermissionsForMapping($rule->getUserMapping(), $storageId, $parentPaths);
+
+		if ($inheritedPermissions === null) {
+			$this->deleteRule($rule);
+		} elseif ($rule->getPermissions() === $inheritedPermissions['permissions']) {
+			$this->deleteRule($rule);
+		} else {
+			$denyRule = new Rule(
+				$rule->getUserMapping(),
+				$rule->getFileId(),
+				63,
+				0
+			);
+			$this->saveRule($denyRule);
+		}
+	}
+
+	public function propagateRuleDeleteToChildren(Rule $rule, int $storageId, string $parentPath): void {
+		$query = $this->connection->getQueryBuilder();
+		$query->select(['f.fileid', 'a.mask', 'a.permissions'])
+			->from('group_folders_acl', 'a')
+			->innerJoin('a', 'filecache', 'f', $query->expr()->eq('f.fileid', 'a.fileid'))
+			->where($query->expr()->like('f.path', $query->createNamedParameter($this->connection->escapeLikeParameter($parentPath) . '/%')))
+			->andWhere($query->expr()->eq('f.storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)))
+			->andWhere($query->expr()->eq('a.mapping_type', $query->createNamedParameter($rule->getUserMapping()->getType())))
+			->andWhere($query->expr()->eq('a.mapping_id', $query->createNamedParameter($rule->getUserMapping()->getId())))
+			->orderBy('f.path', 'ASC');
+
+		$rows = $query->executeQuery()->fetchAll();
+
+		foreach ($rows as $row) {
+			$childRule = new Rule(
+				$rule->getUserMapping(),
+				(int)$row['fileid'],
+				(int)$row['mask'],
+				(int)$row['permissions']
+			);
+			$this->deleteRuleOrDeny($childRule);
 		}
 	}
 

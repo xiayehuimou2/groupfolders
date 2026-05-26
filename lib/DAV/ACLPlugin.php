@@ -374,10 +374,11 @@ class ACLPlugin extends ServerPlugin {
 					break;
 				case 'update':
 					$this->ruleManager->saveRule($rule);
-					$this->ruleManager->propagateRuleToAllChildren($rule, $mount->getNumericStorageId(), $fullPath);
+					$this->ruleManager->propagateRuleUpdateToChildren($rule, $mount->getNumericStorageId(), $fullPath);
 					break;
 				case 'delete':
-					$this->ruleManager->deleteRule($rule);
+					$this->ruleManager->deleteRuleOrDeny($rule);
+					$this->ruleManager->propagateRuleDeleteToChildren($rule, $mount->getNumericStorageId(), $fullPath);
 					break;
 				default:
 					return false;

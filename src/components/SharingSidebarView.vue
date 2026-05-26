@@ -402,19 +402,20 @@ export default {
 		async createAcl(option) {
 			this.value = null
 			const existingIndex = this.list.findIndex(item => item.mappingType === option.type && item.mappingId === option.id)
+			let rule
 			if (existingIndex > -1) {
-				const existingRule = this.list[existingIndex].clone()
-				existingRule.mask = 0b111111
-				existingRule.permissions = OC.PERMISSION_READ
-				existingRule.inherited = false
-				Vue.set(this.list, existingIndex, existingRule)
+				rule = this.list[existingIndex].clone()
+				rule.mask = 0b111111
+				rule.permissions = OC.PERMISSION_READ
+				rule.inherited = false
+				Vue.set(this.list, existingIndex, rule)
 			} else {
-				const rule = new Rule()
+				rule = new Rule()
 				rule.fromValues(option.type, option.id, option.displayname, 0b111111, OC.PERMISSION_READ)
 				this.list.push(rule)
 			}
 			try {
-				await client.propPatch(this.model, this.list.filter(r => !r.inherited))
+				await client.propPatchRuleOperation(this.model, rule, 'add')
 				this.showAclCreate = false
 			} finally {
 				this.loadAcls()
@@ -424,24 +425,30 @@ export default {
 			const index = this.list.indexOf(rule)
 			
 			if (index > -1) {
-				let rulesToSend
 				if (rule.inherited) {
 					const newRule = rule.clone()
 					newRule.inherited = false
 					newRule.mask = 63
 					newRule.permissions = 0
 					Vue.set(this.list, index, newRule)
-					rulesToSend = this.list.filter(r => !r.inherited)
+					try {
+						await client.propPatchRuleOperation(this.model, newRule, 'update')
+					} catch (error) {
+						Vue.set(this.list, index, rule)
+						showError(error.message || t('groupfolders', 'Failed to remove inherited permission'))
+					} finally {
+						this.loadAcls()
+					}
 				} else {
-					this.list.splice(index, 1)
-					rulesToSend = this.list.filter(r => !r.inherited)
-					this.aclCanManage = this.currentUserEffectivePermission > 0 && (this.currentUserEffectivePermission & 32) !== 0
-				}
-				
-				try {
-					await client.propPatch(this.model, rulesToSend)
-				} finally {
-					this.loadAcls()
+					try {
+						await client.propPatchRuleOperation(this.model, rule, 'delete')
+						this.list.splice(index, 1)
+						this.aclCanManage = this.currentUserEffectivePermission > 0 && (this.currentUserEffectivePermission & 32) !== 0
+					} catch (error) {
+						showError(error.message || t('groupfolders', 'Failed to remove permission'))
+					} finally {
+						this.loadAcls()
+					}
 				}
 			}
 		},
@@ -484,7 +491,7 @@ export default {
 			Vue.set(this.list, index, item)
 			this.loading = true
 			try {
-				await client.propPatch(this.model, this.list.filter(rule => !rule.inherited))
+				await client.propPatchRuleOperation(this.model, item, 'update')
 			} catch (error) {
 				Vue.set(this.list, index, itemRestorePoint)
 				showError(error.message || t('groupfolders', 'Failed to update permission'))

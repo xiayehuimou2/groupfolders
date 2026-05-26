@@ -253,21 +253,44 @@ class AclDavService {
 				if (response.status === 207) {
 					return response
 				} else if (response.status === 403) {
-					// Handle permission denied scenario
 					logger.error('Permission denied:', { responseStatus: response.status, responseStatusText: response.statusText })
 					throw new Error(t('groupfolders', 'Permission denied. User does not have sufficient permissions.'))
 				} else {
-					// Handle unexpected status codes
 					logger.error('Unexpected status:', { responseStatus: response.status, responseStatusText: response.statusText })
-
 					throw new Error(response.xhr.responseXML?.querySelector('message')?.textContent ?? t('groupfolders', 'Unexpected status from server'))
 				}
 		  }).catch(error => {
-			// Handle network errors or exceptions
 				logger.error('Error in propPatch:', { error })
 				throw error
 		  })
 	  }
+
+	propPatchRuleOperation(model, rule, operationType) {
+		const props = {}
+		props[ACL_PROPERTIES.PROPERTY_ACL_RULE_OPERATION] = {
+			[ACL_PROPERTIES.PROPERTY_ACL_OPERATION_TYPE]: operationType,
+			[ACL_PROPERTIES.PROPERTY_ACL_MAPPING_TYPE]: rule.mappingType,
+			[ACL_PROPERTIES.PROPERTY_ACL_MAPPING_ID]: rule.mappingId,
+			[ACL_PROPERTIES.PROPERTY_ACL_MASK]: rule.mask,
+			[ACL_PROPERTIES.PROPERTY_ACL_PERMISSIONS]: rule.permissions,
+		}
+
+		return client._client.propPatch(client._client.baseUrl + model.path.replaceAll('#', '%23') + '/' + encodeURIComponent(model.name), props)
+			.then(response => {
+				if (response.status === 207) {
+					return response
+				} else if (response.status === 403) {
+					logger.error('Permission denied:', { responseStatus: response.status, responseStatusText: response.statusText })
+					throw new Error(t('groupfolders', 'Permission denied. User does not have sufficient permissions.'))
+				} else {
+					logger.error('Unexpected status:', { responseStatus: response.status, responseStatusText: response.statusText })
+					throw new Error(response.xhr.responseXML?.querySelector('message')?.textContent ?? t('groupfolders', 'Unexpected status from server'))
+				}
+			}).catch(error => {
+				logger.error('Error in propPatchRuleOperation:', { error })
+				throw error
+			})
+	}
 
 }
 

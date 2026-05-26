@@ -15,6 +15,8 @@ const ACL_PROPERTIES = {
 	PROPERTY_INHERITED_ACL_LIST: '{' + OC.Files.Client.NS_NEXTCLOUD + '}inherited-acl-list',
 	GROUP_FOLDER_ID: '{' + OC.Files.Client.NS_NEXTCLOUD + '}group-folder-id',
 	PROPERTY_ACL_NODE_PATH: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-node-path',
+	PROPERTY_ACL_RULE_OPERATION: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-rule-operation',
+	PROPERTY_ACL_OPERATION_TYPE: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-operation-type',
 }
 
 export default ACL_PROPERTIES

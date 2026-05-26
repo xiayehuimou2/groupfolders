@@ -12,6 +12,7 @@ use OCA\DAV\Connector\Sabre\Node;
 use OCA\GroupFolders\ACL\ACLManagerFactory;
 use OCA\GroupFolders\ACL\Rule;
 use OCA\GroupFolders\ACL\RuleManager;
+use OCA\GroupFolders\ACL\UserMapping\UserMapping;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCA\GroupFolders\Mount\GroupMountPoint;
 use OCP\Constants;
@@ -36,6 +37,8 @@ class ACLPlugin extends ServerPlugin {
 	public const GROUP_FOLDER_ID = '{http://nextcloud.org/ns}group-folder-id';
 	public const IS_HIDDEN_VISIBLE = '{http://nextcloud.org/ns}is-hidden-visible';
 	public const ACL_NODE_PATH = '{http://nextcloud.org/ns}acl-node-path';
+	public const ACL_RULE_OPERATION = '{http://nextcloud.org/ns}acl-rule-operation';
+	public const ACL_OPERATION_TYPE = '{http://nextcloud.org/ns}acl-operation-type';
 
 	private ?Server $server = null;
 	private ?IUser $user = null;
@@ -83,6 +86,16 @@ class ACLPlugin extends ServerPlugin {
 		$this->server->xml->elementMap[Rule::ACL] = Rule::class;
 		$this->server->xml->elementMap[self::ACL_LIST] = function (Reader $reader): array {
 			return \Sabre\Xml\Deserializer\repeatingElements($reader, Rule::ACL);
+		};
+		$this->server->xml->elementMap[self::ACL_RULE_OPERATION] = function (Reader $reader): array {
+			$elements = \Sabre\Xml\Deserializer\keyValue($reader);
+			return [
+				'operationType' => $elements[self::ACL_OPERATION_TYPE] ?? '',
+				'mappingType' => $elements[Rule::MAPPING_TYPE] ?? '',
+				'mappingId' => $elements[Rule::MAPPING_ID] ?? '',
+				'mask' => (int)($elements[Rule::MASK] ?? 0),
+				'permissions' => (int)($elements[Rule::PERMISSIONS] ?? 0),
+			];
 		};
 	}
 
@@ -292,6 +305,83 @@ class ACLPlugin extends ServerPlugin {
 				$this->ruleManager->propagateAclChangeToChildren($rule, $mount->getNumericStorageId(), $path, false);
 			}
 
+
+			$node->getNode()->getStorage()->getPropagator()->propagateChange($fileInfo->getInternalPath(), $fileInfo->getMtime());
+
+			return true;
+		});
+
+		$propPatch->handle(self::ACL_RULE_OPERATION, function (array $operationData) use ($path) {
+			$node = $this->server->tree->getNodeForPath($path);
+			if (!$node instanceof Node) {
+				return false;
+			}
+			$fileInfo = $node->getFileInfo();
+			$mount = $fileInfo->getMountPoint();
+			if (!$mount instanceof GroupMountPoint) {
+				return false;
+			}
+			if ($this->user === null) {
+				return false;
+			}
+
+			$operationType = $operationData['operationType'] ?? '';
+			$mappingType = $operationData['mappingType'] ?? '';
+			$mappingId = $operationData['mappingId'] ?? '';
+			$mask = $operationData['mask'] ?? 0;
+			$permissions = $operationData['permissions'] ?? 0;
+
+			if (empty($mappingType) || empty($mappingId)) {
+				return false;
+			}
+
+			$userMapping = new UserMapping($mappingType, $mappingId);
+
+			$rule = new Rule(
+				$userMapping,
+				$fileInfo->getId(),
+				$mask,
+				$permissions
+			);
+
+			$fullPath = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
+
+			$this->eventDispatcher->dispatchTyped(new CriticalActionPerformedEvent(
+				'ACL rule %s: %s "%s" on "%s" in groupfolder with id %d (mask=%d, permissions=%d)',
+				[
+					$operationType,
+					$mappingType,
+					$mappingId,
+					$fileInfo->getInternalPath(),
+					$mount->getFolderId(),
+					$mask,
+					$permissions,
+				]
+			));
+
+			$aclManager = $this->aclManagerFactory->getACLManager($this->user);
+			if (!$this->canManageACLForNode($fileInfo, $mount)) {
+				$newPermissions = $aclManager->testACLPermissionsForPath($fullPath, [$rule]);
+				if (!($newPermissions & Constants::PERMISSION_READ)) {
+					throw new BadRequest($this->l10n->t('You can not remove your own read permission.'));
+				}
+			}
+
+			switch ($operationType) {
+				case 'add':
+					$this->ruleManager->saveRule($rule);
+					$this->ruleManager->propagateRuleToAllChildren($rule, $mount->getNumericStorageId(), $fullPath);
+					break;
+				case 'update':
+					$this->ruleManager->saveRule($rule);
+					$this->ruleManager->propagateRuleToAllChildren($rule, $mount->getNumericStorageId(), $fullPath);
+					break;
+				case 'delete':
+					$this->ruleManager->deleteRule($rule);
+					break;
+				default:
+					return false;
+			}
 
 			$node->getNode()->getStorage()->getPropagator()->propagateChange($fileInfo->getInternalPath(), $fileInfo->getMtime());
 

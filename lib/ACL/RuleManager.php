@@ -344,6 +344,27 @@ class RuleManager {
 		}
 	}
 
+	public function propagateRuleToAllChildren(Rule $rule, int $storageId, string $parentPath): void {
+		$query = $this->connection->getQueryBuilder();
+		$query->select(['fileid', 'path'])
+			->from('filecache')
+			->where($query->expr()->like('path', $query->createNamedParameter($this->connection->escapeLikeParameter($parentPath) . '/%')))
+			->andWhere($query->expr()->eq('storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)));
+
+		$rows = $query->executeQuery()->fetchAll();
+
+		foreach ($rows as $row) {
+			$fileId = (int)$row['fileid'];
+			$newRule = new Rule(
+				$rule->getUserMapping(),
+				$fileId,
+				$rule->getMask(),
+				$rule->getPermissions()
+			);
+			$this->saveRule($newRule);
+		}
+	}
+
 	public function deleteRule(Rule $rule): void {
 		$query = $this->connection->getQueryBuilder();
 		$query->delete('group_folders_acl')

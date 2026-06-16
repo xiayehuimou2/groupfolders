@@ -3,7 +3,7 @@
   - SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <template>
-	<div v-if="aclEnabled && !loading && (isAdmin || currentUserEffectivePermission > 0)" id="groupfolder-acl-container" :class="{ 'admin-mode': isAdmin }">
+	<div v-if="aclEnabled && !loading && (isAdmin || currentUserEffectivePermission > 0 || manageDisplayList.length > 0)" id="groupfolder-acl-container" :class="{ 'admin-mode': isAdmin }">
 		<div class="acl-add-row">
 			<NcButton v-if="isAdmin && !loading && !showAclCreate"
 				@click="toggleAclCreate">
@@ -50,28 +50,10 @@
 				<th class="permissions-column">
 					{{ t('groupfolders', 'Permissions') }}
 				</th>
-				<th class="state-column" />
+				<th v-if="isAdmin" class="state-column" />
 			</tr>
 			</thead>
-			<tbody v-if="!isAdmin">
-			<tr>
-				<td>
-					<NcAvatar user="admin" :size="24" />
-				</td>
-				<td class="username">
-					{{ t('groupfolders', 'You') }}
-				</td>
-				<td class="permissions-column">
-					<NcSelect
-						:options="[{label: t('groupfolders', 'Read'), value: 'read'}, {label: t('groupfolders', 'Edit'), value: 'edit'}, {label: t('groupfolders', 'Manage'), value: 'manage'}]"
-						:value="getUserPermissionOption({ permissions: currentUserEffectivePermission, mask: 63 })"
-						:disabled="true"
-						class="permission-select"
-						:placeholder="t('groupfolders', 'No permission')" />
-				</td>
-			</tr>
-			</tbody>
-			<tbody v-else>
+			<tbody v-if="isAdmin">
 			<tr v-for="item in displayList" :key="item.mappingType + '-' + item.mappingId">
 				<td>
 					<NcAvatar :user="item.mappingId" :is-no-user="item.mappingType !== 'user'" :size="24" />
@@ -106,6 +88,34 @@
 							<Delete :size="16" />
 						</template>
 					</NcButton>
+				</td>
+			</tr>
+			</tbody>
+			<tbody v-else>
+			<tr v-for="item in manageDisplayList" :key="'manage-' + item.mappingType + '-' + item.mappingId">
+				<td>
+					<NcAvatar :user="item.mappingId" :is-no-user="item.mappingType !== 'user'" :size="24" />
+				</td>
+				<td v-tooltip="getFullDisplayName(item.mappingDisplayName, item.mappingType)" class="username">
+					{{ getFullDisplayName(item.mappingDisplayName, item.mappingType) }}
+				</td>
+				<td class="permissions-column">
+					<span class="permission-text readonly">
+						{{ getPermissionLabel(item) }}
+					</span>
+				</td>
+			</tr>
+			<tr v-if="currentUserEffectivePermission > 0">
+				<td>
+					<NcAvatar user="admin" :size="24" />
+				</td>
+				<td class="username">
+					{{ t('groupfolders', 'You') }}
+				</td>
+				<td class="permissions-column">
+					<span class="permission-text readonly">
+						{{ getPermissionLabel({ permissions: currentUserEffectivePermission }) }}
+					</span>
 				</td>
 			</tr>
 			</tbody>
@@ -167,6 +177,7 @@ export default {
 			value: null,
 			model: null,
 			list: [],
+			manageAclList: [],
 			editingItemId: null,
 			permissionOptions: [
 				{ label: t('groupfolders', 'Read'), value: 'read' },
@@ -188,6 +199,9 @@ export default {
 		},
 		displayList() {
 			return this.list.filter(item => item.permissions !== 0)
+		},
+		manageDisplayList() {
+			return this.manageAclList.filter(item => item.permissions !== 0)
 		},
 		isNotInherited() {
 			return (permission, mask) => {
@@ -320,6 +334,9 @@ export default {
 					if (data.acls) {
 						this.list = data.acls
 					}
+					if (data.manageAcls) {
+						this.manageAclList = data.manageAcls
+					}
 					this.inheritedAclsById = data.inheritedAclsById
 					this.aclEnabled = data.aclEnabled
 					this.aclCanManage = data.aclCanManage
@@ -330,7 +347,9 @@ export default {
 					}
 				}
 				this.loading = false
-				this.searchMappings('')
+				if (this.aclCanManage) {
+					this.searchMappings('')
+				}
 			}).catch(() => {
 				this.loading = false
 			})
@@ -667,5 +686,22 @@ export default {
 
 	.acl-select-wrapper .v-select {
 		flex: 1;
+	}
+
+	.manage-list-hint {
+		padding: 8px 4px;
+		margin-bottom: 8px;
+		color: var(--color-text-maxcontrast);
+		font-size: 12px;
+		line-height: 1.4;
+	}
+
+	.permission-text.readonly {
+		cursor: default;
+		color: var(--color-text-maxcontrast);
+	}
+
+	.permission-text.readonly:hover {
+		background-color: transparent;
 	}
 </style>

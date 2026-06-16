@@ -12,6 +12,7 @@ use OCA\DAV\Connector\Sabre\Node;
 use OCA\GroupFolders\ACL\ACLManagerFactory;
 use OCA\GroupFolders\ACL\Rule;
 use OCA\GroupFolders\ACL\RuleManager;
+use OCA\GroupFolders\ACL\UserMapping\IUserMappingManager;
 use OCA\GroupFolders\ACL\UserMapping\UserMapping;
 use OCA\GroupFolders\Folder\FolderManager;
 use OCA\GroupFolders\Mount\GroupMountPoint;
@@ -37,6 +38,7 @@ class ACLPlugin extends ServerPlugin {
 	public const GROUP_FOLDER_ID = '{http://nextcloud.org/ns}group-folder-id';
 	public const IS_HIDDEN_VISIBLE = '{http://nextcloud.org/ns}is-hidden-visible';
 	public const ACL_NODE_PATH = '{http://nextcloud.org/ns}acl-node-path';
+	public const ACL_MANAGE_LIST = '{http://nextcloud.org/ns}acl-manage-list';
 	public const ACL_RULE_OPERATION = '{http://nextcloud.org/ns}acl-rule-operation';
 	public const ACL_OPERATION_TYPE = '{http://nextcloud.org/ns}acl-operation-type';
 
@@ -50,6 +52,7 @@ class ACLPlugin extends ServerPlugin {
 		private IEventDispatcher $eventDispatcher,
 		private ACLManagerFactory $aclManagerFactory,
 		private IL10N $l10n,
+		private IUserMappingManager $userMappingManager,
 	) {
 	}
 
@@ -85,6 +88,9 @@ class ACLPlugin extends ServerPlugin {
 
 		$this->server->xml->elementMap[Rule::ACL] = Rule::class;
 		$this->server->xml->elementMap[self::ACL_LIST] = function (Reader $reader): array {
+			return \Sabre\Xml\Deserializer\repeatingElements($reader, Rule::ACL);
+		};
+		$this->server->xml->elementMap[self::ACL_MANAGE_LIST] = function (Reader $reader): array {
 			return \Sabre\Xml\Deserializer\repeatingElements($reader, Rule::ACL);
 		};
 		$this->server->xml->elementMap[self::ACL_RULE_OPERATION] = function (Reader $reader): array {
@@ -126,49 +132,179 @@ class ACLPlugin extends ServerPlugin {
 			return;
 		}
 
-		$propFind->handle(self::ACL_LIST, function () use ($fileInfo, $mount) {
-			$path = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
-			if ($this->canManageACLForNode($fileInfo, $mount)) {
-				$rules = $this->ruleManager->getAllRulesForPaths($mount->getNumericStorageId(), [$path]);
-			} else {
-				$rules = $this->ruleManager->getRulesForFilesByPath($this->user, $mount->getNumericStorageId(), [$path]);
-			}
-			return array_pop($rules);
-		});
+		$storageId = $mount->getNumericStorageId();
+		$path = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
+		$parentInternalPaths = $this->getParents($fileInfo->getInternalPath());
+		$parentPaths = array_map(function (string $internalPath) use ($mount) {
+			return trim($mount->getSourcePath() . '/' . $internalPath, '/');
+		}, $parentInternalPaths);
 
-		$propFind->handle(self::INHERITED_ACL_LIST, function () use ($fileInfo, $mount) {
-			$parentInternalPaths = $this->getParents($fileInfo->getInternalPath());
-			$parentPaths = array_map(function (string $internalPath) use ($mount) {
-				return trim($mount->getSourcePath() . '/' . $internalPath, '/');
-			}, $parentInternalPaths);
-			if ($this->canManageACLForNode($fileInfo, $mount)) {
-				$rulesByPath = $this->ruleManager->getAllRulesForPaths($mount->getNumericStorageId(), $parentPaths);
-			} else {
-				$rulesByPath = $this->ruleManager->getRulesForFilesByPath($this->user, $mount->getNumericStorageId(), $parentPaths);
-			}
+		$cachedFolderId = null;
+		$cachedCanManage = null;
+		$cachedAllCombinedRules = null;
+		$cachedUserFilteredDirectRules = null;
+		$cachedUserFilteredInheritedByPath = null;
+		$cachedInheritedPermissionsResult = null;
+		$cachedInheritedPermissionsResultForUser = null;
 
-			ksort($rulesByPath);
-			$inheritedPermissionsByMapping = [];
-			$inheritedMaskByMapping = [];
-			$mappings = [];
-			foreach ($rulesByPath as $rules) {
-				foreach ($rules as $rule) {
-					/** @var Rule $rule */
-					$mappingKey = $rule->getUserMapping()->getType() . '::' . $rule->getUserMapping()->getId();
-					if (!isset($mappings[$mappingKey])) {
-						$mappings[$mappingKey] = $rule->getUserMapping();
+		$getFolderId = function () use ($fileInfo, &$cachedFolderId): int {
+			if ($cachedFolderId === null) {
+				$cachedFolderId = $this->folderManager->getFolderByPath($fileInfo->getPath());
+			}
+			return $cachedFolderId;
+		};
+
+		$getCanManage = function () use ($path, &$cachedCanManage, $getFolderId) {
+			if ($cachedCanManage === null) {
+				if ($this->user === null) {
+					$cachedCanManage = false;
+				} else {
+					$folderId = $getFolderId();
+					if ($this->folderManager->canManageACL($folderId, $this->user)) {
+						$cachedCanManage = true;
+					} else {
+						$aclManager = $this->aclManagerFactory->getACLManager($this->user);
+						$cachedCanManage = $aclManager->hasManageACLPermission($path);
 					}
-					if (!isset($inheritedPermissionsByMapping[$mappingKey])) {
-						$inheritedPermissionsByMapping[$mappingKey] = Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
-					}
-					if (!isset($inheritedMaskByMapping[$mappingKey])) {
-						$inheritedMaskByMapping[$mappingKey] = 0;
-					}
-					$inheritedPermissionsByMapping[$mappingKey] = $rule->applyPermissions($inheritedPermissionsByMapping[$mappingKey]);
-					$inheritedMaskByMapping[$mappingKey] |= $rule->getMask();
 				}
 			}
+			return $cachedCanManage;
+		};
 
+		$getAllCombinedRules = function () use ($storageId, $path, $parentPaths, &$cachedAllCombinedRules) {
+			if ($cachedAllCombinedRules === null) {
+				$cachedAllCombinedRules = $this->ruleManager->getAllRulesForPathWithParents($storageId, $path, $parentPaths);
+			}
+			return $cachedAllCombinedRules;
+		};
+
+		$cachedUserMappings = null;
+		$getUserMappings = function () use (&$cachedUserMappings) {
+			if ($cachedUserMappings === null) {
+				$cachedUserMappings = $this->userMappingManager->getMappingsForUser($this->user);
+			}
+			return $cachedUserMappings;
+		};
+
+		$filterRulesForUser = function (array $rules) use ($getUserMappings): array {
+			if ($this->user === null) {
+				return [];
+			}
+			$userMappings = $getUserMappings();
+			return array_values(array_filter($rules, function (Rule $rule) use ($userMappings): bool {
+				foreach ($userMappings as $userMapping) {
+					if (
+						$userMapping->getType() === $rule->getUserMapping()->getType() &&
+						$userMapping->getId() === $rule->getUserMapping()->getId()
+					) {
+						return true;
+					}
+				}
+				return false;
+			}));
+		};
+
+		$filterRulesByPathForUser = function (array $rulesByPath) use ($filterRulesForUser): array {
+			$result = [];
+			foreach ($rulesByPath as $pathKey => $rules) {
+				$filtered = $filterRulesForUser($rules);
+				if (!empty($filtered)) {
+					$result[$pathKey] = $filtered;
+				}
+			}
+			return $result;
+		};
+
+		$getDirectRules = function () use ($getCanManage, $getAllCombinedRules, &$cachedUserFilteredDirectRules, $filterRulesForUser) {
+			if ($getCanManage()) {
+				return $getAllCombinedRules()['direct'];
+			}
+			if ($cachedUserFilteredDirectRules === null) {
+				$cachedUserFilteredDirectRules = $filterRulesForUser($getAllCombinedRules()['direct']);
+			}
+			return $cachedUserFilteredDirectRules;
+		};
+
+		$getInheritedRulesByPath = function () use ($getCanManage, $getAllCombinedRules, &$cachedUserFilteredInheritedByPath, $filterRulesByPathForUser) {
+			if ($getCanManage()) {
+				return $getAllCombinedRules()['inheritedByPath'];
+			}
+			if ($cachedUserFilteredInheritedByPath === null) {
+				$cachedUserFilteredInheritedByPath = $filterRulesByPathForUser($getAllCombinedRules()['inheritedByPath']);
+			}
+			return $cachedUserFilteredInheritedByPath;
+		};
+
+		$getInheritedPermissionsResult = function () use ($fileInfo, &$cachedInheritedPermissionsResult, $getCanManage, $getAllCombinedRules) {
+			if ($cachedInheritedPermissionsResult === null) {
+				$rulesByPath = $getAllCombinedRules()['inheritedByPath'];
+				ksort($rulesByPath);
+				$inheritedPermissionsByMapping = [];
+				$inheritedMaskByMapping = [];
+				$mappings = [];
+				foreach ($rulesByPath as $rules) {
+					foreach ($rules as $rule) {
+						$mappingKey = $rule->getUserMapping()->getType() . '::' . $rule->getUserMapping()->getId();
+						if (!isset($mappings[$mappingKey])) {
+							$mappings[$mappingKey] = $rule->getUserMapping();
+						}
+						if (!isset($inheritedPermissionsByMapping[$mappingKey])) {
+							$inheritedPermissionsByMapping[$mappingKey] = Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
+						}
+						if (!isset($inheritedMaskByMapping[$mappingKey])) {
+							$inheritedMaskByMapping[$mappingKey] = 0;
+						}
+						$inheritedPermissionsByMapping[$mappingKey] = $rule->applyPermissions($inheritedPermissionsByMapping[$mappingKey]);
+						$inheritedMaskByMapping[$mappingKey] |= $rule->getMask();
+					}
+				}
+				$cachedInheritedPermissionsResult = [
+					'mappings' => $mappings,
+					'permissions' => $inheritedPermissionsByMapping,
+					'masks' => $inheritedMaskByMapping,
+				];
+			}
+			return $cachedInheritedPermissionsResult;
+		};
+
+		$getInheritedPermissionsResultForUser = function () use ($fileInfo, &$cachedInheritedPermissionsResultForUser, $getInheritedRulesByPath) {
+			if ($cachedInheritedPermissionsResultForUser === null) {
+				$rulesByPath = $getInheritedRulesByPath();
+				ksort($rulesByPath);
+				$inheritedPermissionsByMapping = [];
+				$inheritedMaskByMapping = [];
+				$mappings = [];
+				foreach ($rulesByPath as $rules) {
+					foreach ($rules as $rule) {
+						$mappingKey = $rule->getUserMapping()->getType() . '::' . $rule->getUserMapping()->getId();
+						if (!isset($mappings[$mappingKey])) {
+							$mappings[$mappingKey] = $rule->getUserMapping();
+						}
+						if (!isset($inheritedPermissionsByMapping[$mappingKey])) {
+							$inheritedPermissionsByMapping[$mappingKey] = Constants::PERMISSION_ALL | Rule::PERMISSION_MANAGE_ACL;
+						}
+						if (!isset($inheritedMaskByMapping[$mappingKey])) {
+							$inheritedMaskByMapping[$mappingKey] = 0;
+						}
+						$inheritedPermissionsByMapping[$mappingKey] = $rule->applyPermissions($inheritedPermissionsByMapping[$mappingKey]);
+						$inheritedMaskByMapping[$mappingKey] |= $rule->getMask();
+					}
+				}
+				$cachedInheritedPermissionsResultForUser = [
+					'mappings' => $mappings,
+					'permissions' => $inheritedPermissionsByMapping,
+					'masks' => $inheritedMaskByMapping,
+				];
+			}
+			return $cachedInheritedPermissionsResultForUser;
+		};
+
+		$propFind->handle(self::ACL_LIST, function () use ($getDirectRules) {
+			return $getDirectRules();
+		});
+
+		$propFind->handle(self::INHERITED_ACL_LIST, function () use ($fileInfo, $getCanManage, $getInheritedPermissionsResultForUser) {
+			$result = $getInheritedPermissionsResultForUser();
 			return array_map(function ($mapping, $permissions, $mask) use ($fileInfo) {
 				return new Rule(
 					$mapping,
@@ -176,41 +312,90 @@ class ACLPlugin extends ServerPlugin {
 					$mask,
 					$permissions
 				);
-			}, $mappings, $inheritedPermissionsByMapping, $inheritedMaskByMapping);
+			}, $result['mappings'], $result['permissions'], $result['masks']);
 		});
 
-		$propFind->handle(self::GROUP_FOLDER_ID, function () use ($fileInfo) {
-			return $this->folderManager->getFolderByPath($fileInfo->getPath());
+		$propFind->handle(self::GROUP_FOLDER_ID, function () use ($getFolderId) {
+			return $getFolderId();
 		});
 
-		$propFind->handle(self::ACL_ENABLED, function () use ($fileInfo) {
-			$folderId = $this->folderManager->getFolderByPath($fileInfo->getPath());
+		$propFind->handle(self::ACL_ENABLED, function () use ($getFolderId) {
+			$folderId = $getFolderId();
 			return $this->folderManager->getFolderAclEnabled($folderId);
 		});
 
-		$propFind->handle(self::ACL_CAN_MANAGE, function () use ($fileInfo, $mount) {
-			return $this->canManageACLForNode($fileInfo, $mount);
+		$propFind->handle(self::ACL_CAN_MANAGE, function () use ($getCanManage) {
+			return $getCanManage();
 		});
 
-		$propFind->handle(self::IS_HIDDEN_VISIBLE, function () use ($fileInfo, $mount) {
-			$path = trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
+		$propFind->handle(self::IS_HIDDEN_VISIBLE, function () use ($fileInfo, $path) {
 			$permissions = $fileInfo->getPermissions();
-			
+
 			$hasBasicRead = ($permissions & Constants::PERMISSION_READ) !== 0;
 			$hasOtherPerms = ($permissions & (Constants::PERMISSION_UPDATE | Constants::PERMISSION_CREATE | Constants::PERMISSION_DELETE | Constants::PERMISSION_SHARE)) !== 0;
-			
+
 			if ($hasBasicRead && !$hasOtherPerms) {
 				if ($fileInfo->getType() === \OCP\Files\FileInfo::TYPE_FOLDER) {
 					$aclManager = $this->aclManagerFactory->getACLManager($this->user);
 					return $aclManager->isEchoOnlyDirectory($path);
 				}
 			}
-			
+
 			return false;
 		});
 
-		$propFind->handle(self::ACL_NODE_PATH, function () use ($fileInfo, $mount) {
-			return trim($mount->getSourcePath() . '/' . $fileInfo->getInternalPath(), '/');
+		$propFind->handle(self::ACL_NODE_PATH, function () use ($path) {
+			return $path;
+		});
+
+		$propFind->handle(self::ACL_MANAGE_LIST, function () use ($fileInfo, $getCanManage, $getAllCombinedRules, $getInheritedPermissionsResult) {
+			if ($getCanManage()) {
+				return [];
+			}
+
+			$allCombinedRules = $getAllCombinedRules();
+			$directRules = $allCombinedRules['direct'];
+			$inheritedResult = $getInheritedPermissionsResult();
+			$mappings = $inheritedResult['mappings'];
+			$inheritedPermissionsByMapping = $inheritedResult['permissions'];
+
+			$manageRules = [];
+			$processedMappings = [];
+
+			foreach ($directRules as $rule) {
+				$mappingKey = $rule->getUserMapping()->getType() . '::' . $rule->getUserMapping()->getId();
+				$mappings[$mappingKey] = $rule->getUserMapping();
+				$processedMappings[$mappingKey] = true;
+
+				$effectivePermissions = $rule->getPermissions();
+				if (isset($inheritedPermissionsByMapping[$mappingKey])) {
+					$effectivePermissions = ($rule->getPermissions() & $rule->getMask()) | ($inheritedPermissionsByMapping[$mappingKey] & ~$rule->getMask());
+				}
+
+				if (($effectivePermissions & Rule::PERMISSION_MANAGE_ACL) !== 0) {
+					$manageRules[] = new Rule(
+						$rule->getUserMapping(),
+						$fileInfo->getId(),
+						63,
+						$effectivePermissions
+					);
+				}
+			}
+
+			foreach ($mappings as $mappingKey => $mapping) {
+				if (!isset($processedMappings[$mappingKey]) && isset($inheritedPermissionsByMapping[$mappingKey])) {
+					if (($inheritedPermissionsByMapping[$mappingKey] & Rule::PERMISSION_MANAGE_ACL) !== 0) {
+						$manageRules[] = new Rule(
+							$mapping,
+							$fileInfo->getId(),
+							63,
+							$inheritedPermissionsByMapping[$mappingKey]
+						);
+					}
+				}
+			}
+
+			return $manageRules;
 		});
 	}
 

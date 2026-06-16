@@ -21,6 +21,8 @@ class RuleManager {
 	private IUserMappingManager $userMappingManager;
 	private IEventDispatcher $eventDispatcher;
 
+	private array $mappingCache = [];
+
 	public function __construct(IDBConnection $connection, IUserMappingManager $userMappingManager, IEventDispatcher $eventDispatcher) {
 		$this->connection = $connection;
 		$this->userMappingManager = $userMappingManager;
@@ -28,7 +30,11 @@ class RuleManager {
 	}
 
 	private function createRule(array $data): ?Rule {
-		$mapping = $this->userMappingManager->mappingFromId($data['mapping_type'], $data['mapping_id']);
+		$cacheKey = $data['mapping_type'] . '::' . $data['mapping_id'];
+		if (!isset($this->mappingCache[$cacheKey])) {
+			$this->mappingCache[$cacheKey] = $this->userMappingManager->mappingFromId($data['mapping_type'], $data['mapping_id']);
+		}
+		$mapping = $this->mappingCache[$cacheKey];
 		if ($mapping) {
 			return new Rule(
 				$mapping,
@@ -191,6 +197,114 @@ class RuleManager {
 		$rows = $query->executeQuery()->fetchAll();
 
 		return $this->rulesByPath($rows);
+	}
+
+	/**
+	 * Get all ACL rules for a direct path and its parent paths in a single query
+	 *
+	 * @param int $storageId
+	 * @param string $directPath
+	 * @param string[] $parentPaths
+	 * @return array{direct: Rule[], inheritedByPath: (Rule[])[]}
+	 */
+	public function getAllRulesForPathWithParents(int $storageId, string $directPath, array $parentPaths): array {
+		$allPaths = array_merge([$directPath], $parentPaths);
+		$hashes = array_map(function (string $path) {
+			return md5(trim($path, '/'));
+		}, $allPaths);
+
+		$query = $this->connection->getQueryBuilder();
+		$query->select(['f.fileid', 'mapping_type', 'mapping_id', 'mask', 'a.permissions', 'f.path'])
+			->from('group_folders_acl', 'a')
+			->innerJoin('a', 'filecache', 'f', $query->expr()->eq('f.fileid', 'a.fileid'))
+			->where($query->expr()->in('f.path_hash', $query->createNamedParameter($hashes, IQueryBuilder::PARAM_STR_ARRAY)))
+			->andWhere($query->expr()->eq('f.storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)));
+
+		$rows = $query->executeQuery()->fetchAll();
+
+		$directRules = [];
+		$inheritedByPath = [];
+		$directPathNormalized = trim($directPath, '/');
+
+		foreach ($rows as $row) {
+			$rule = $this->createRule($row);
+			if ($rule) {
+				$rowPathNormalized = trim($row['path'], '/');
+				if ($rowPathNormalized === $directPathNormalized) {
+					$directRules[] = $rule;
+				} else {
+					$inheritedByPath[$row['path']] ??= [];
+					$inheritedByPath[$row['path']][] = $rule;
+				}
+			}
+		}
+
+		ksort($inheritedByPath);
+
+		return [
+			'direct' => $directRules,
+			'inheritedByPath' => $inheritedByPath,
+		];
+	}
+
+	/**
+	 * Get ACL rules for a direct path and its parent paths filtered by user mappings in a single query
+	 *
+	 * @param IUser $user
+	 * @param int $storageId
+	 * @param string $directPath
+	 * @param string[] $parentPaths
+	 * @return array{direct: Rule[], inheritedByPath: (Rule[])[]}
+	 */
+	public function getRulesForPathWithParents(IUser $user, int $storageId, string $directPath, array $parentPaths): array {
+		$userMappings = $this->userMappingManager->getMappingsForUser($user);
+
+		$allPaths = array_merge([$directPath], $parentPaths);
+		$hashes = array_map(function (string $path) {
+			return md5(trim($path, '/'));
+		}, $allPaths);
+
+		$rows = [];
+		foreach (array_chunk($hashes, 1000) as $chunk) {
+			$query = $this->connection->getQueryBuilder();
+			$query->select(['f.fileid', 'mapping_type', 'mapping_id', 'mask', 'a.permissions', 'f.path'])
+				->from('group_folders_acl', 'a')
+				->innerJoin('a', 'filecache', 'f', $query->expr()->eq('f.fileid', 'a.fileid'))
+				->where($query->expr()->in('f.path_hash', $query->createNamedParameter($chunk, IQueryBuilder::PARAM_STR_ARRAY)))
+				->andWhere($query->expr()->eq('f.storage', $query->createNamedParameter($storageId, IQueryBuilder::PARAM_INT)))
+				->andWhere($query->expr()->orX(...array_map(function (IUserMapping $userMapping) use ($query) {
+					return $query->expr()->andX(
+						$query->expr()->eq('mapping_type', $query->createNamedParameter($userMapping->getType())),
+						$query->expr()->eq('mapping_id', $query->createNamedParameter($userMapping->getId()))
+					);
+				}, $userMappings)));
+
+			$rows = array_merge($rows, $query->executeQuery()->fetchAll());
+		}
+
+		$directRules = [];
+		$inheritedByPath = [];
+		$directPathNormalized = trim($directPath, '/');
+
+		foreach ($rows as $row) {
+			$rule = $this->createRule($row);
+			if ($rule) {
+				$rowPathNormalized = trim($row['path'], '/');
+				if ($rowPathNormalized === $directPathNormalized) {
+					$directRules[] = $rule;
+				} else {
+					$inheritedByPath[$row['path']] ??= [];
+					$inheritedByPath[$row['path']][] = $rule;
+				}
+			}
+		}
+
+		ksort($inheritedByPath);
+
+		return [
+			'direct' => $directRules,
+			'inheritedByPath' => $inheritedByPath,
+		];
 	}
 
 	private function rulesByPath(array $rows, array $result = []): array {

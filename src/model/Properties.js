@@ -17,6 +17,7 @@ const ACL_PROPERTIES = {
 	PROPERTY_ACL_NODE_PATH: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-node-path',
 	PROPERTY_ACL_RULE_OPERATION: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-rule-operation',
 	PROPERTY_ACL_OPERATION_TYPE: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-operation-type',
+	PROPERTY_ACL_MANAGE_LIST: '{' + OC.Files.Client.NS_NEXTCLOUD + '}acl-manage-list',
 }
 
 export default ACL_PROPERTIES

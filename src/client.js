@@ -173,6 +173,10 @@ function patchFilesClient(client) {
 			}
 			return acl
 		})
+
+		const manageAcls = props[ACL_PROPERTIES.PROPERTY_ACL_MANAGE_LIST] || []
+		data.manageAcl = parseAclList(manageAcls)
+
 		return data
 	})
 
@@ -187,7 +191,7 @@ class AclDavService {
 
 	propFind(model) {
 		return client.getFileInfo(model.path + '/' + model.name, {
-			properties: [ACL_PROPERTIES.PROPERTY_ACL_LIST, ACL_PROPERTIES.PROPERTY_INHERITED_ACL_LIST, ACL_PROPERTIES.GROUP_FOLDER_ID, ACL_PROPERTIES.PROPERTY_ACL_ENABLED, ACL_PROPERTIES.PROPERTY_ACL_CAN_MANAGE, ACL_PROPERTIES.PROPERTY_ACL_NODE_PATH],
+			properties: [ACL_PROPERTIES.PROPERTY_ACL_LIST, ACL_PROPERTIES.PROPERTY_INHERITED_ACL_LIST, ACL_PROPERTIES.GROUP_FOLDER_ID, ACL_PROPERTIES.PROPERTY_ACL_ENABLED, ACL_PROPERTIES.PROPERTY_ACL_CAN_MANAGE, ACL_PROPERTIES.PROPERTY_ACL_NODE_PATH, ACL_PROPERTIES.PROPERTY_ACL_MANAGE_LIST],
 		}).then((status, fileInfo) => {
 			if (fileInfo) {
 				const aclsById = {}
@@ -227,9 +231,25 @@ class AclDavService {
 					}
 				}
 
+				const manageAclsById = {}
+				if (fileInfo.manageAcl) {
+					for (const i in fileInfo.manageAcl) {
+						const acl = new Rule()
+						acl.fromValues(
+							fileInfo.manageAcl[i].mappingType,
+							fileInfo.manageAcl[i].mappingId,
+							fileInfo.manageAcl[i].mappingDisplayName,
+							fileInfo.manageAcl[i].mask,
+							fileInfo.manageAcl[i].permissions,
+						)
+						manageAclsById[acl.getUniqueMappingIdentifier()] = acl
+					}
+				}
+
 				return {
 					acls: Object.values(aclsById),
 					inheritedAclsById,
+					manageAcls: Object.values(manageAclsById),
 					aclEnabled: fileInfo.aclEnabled,
 					aclCanManage: fileInfo.aclCanManage,
 					groupFolderId: fileInfo.groupFolderId,
